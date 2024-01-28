@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/dotnet/sdk:7.0
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 RUN apt update && apt install -y patch
 
-COPY wasabi-src /wasabi-src
+COPY ../wasabi-client/wasabi-src /wasabi-src
 COPY logger.patch /wasabi-src/logger.patch
 WORKDIR /wasabi-src
 RUN patch --binary -p1 < logger.patch
