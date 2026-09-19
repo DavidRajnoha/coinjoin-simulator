@@ -668,19 +668,25 @@ class JoinmarketEngine(EngineBase):
             except Exception as e:
                 print(f"- error during async client cleanup: {e}")
 
+    WARMUP_BLOCKS = 5
+
+    def start_block_clock(self) -> int:
+        if self.node is None:
+            raise RuntimeError("Bitcoin node is not initialized")
+        for _ in range(self.WARMUP_BLOCKS):
+            self.node.mine_block()
+        try:
+            return self.node.get_block_count()
+        except Exception as e:
+            print(f"- could not get initial block count: {e}")
+            return 0
+
     def run_engine(self):
         if self.node is None:
             raise RuntimeError("Bitcoin node is not initialized")
 
         # Note: Initial invoice payments now happen before this method is called
-        try:
-            initial_block = self.node.get_block_count()
-        except Exception as e:
-            print(f"- could not get initial block count: {e}")
-            initial_block = 0
-        for i in range(5):
-            # Takers need 3 confirmations of transactions for the sourcing commitments
-            self.node.mine_block()
+        initial_block = self.start_block_clock()
 
         print(f"- coinjoin rounds: {self.current_round} (block {self.current_block})".ljust(60))
 
