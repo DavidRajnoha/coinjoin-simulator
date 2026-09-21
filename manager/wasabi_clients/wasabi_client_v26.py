@@ -27,8 +27,8 @@ class WasabiClientV26(WasabiClientBase):
                 pass
 
             try:
-                self.get_balance(timeout=5)
-                return True
+                if self.wallet_started(timeout=5):
+                    return True
             except Exception:
                 pass
 
