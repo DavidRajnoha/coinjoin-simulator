@@ -33,6 +33,7 @@ SUCCESSFUL_BROADCAST_RE = re.compile(
     re.IGNORECASE,
 )
 WASABI_COORDINATOR_LOG_PATH = "/home/wasabi/.walletwasabi/coordinator/Logs.txt"
+WASABI_CLIENT_DATA_PATH = "/home/wasabi/.walletwasabi/client/"
 WASABI_SETTLEMENT_BLOCKS_AFTER_LIMIT = 3
 DEFAULT_DISTRIBUTOR_STARTUP_TIMEOUT = 900
 WASABI_COORDINATOR_START_TIMEOUT_SECONDS = 120
@@ -62,7 +63,7 @@ class WasabiEngine(EngineBase):
         self.backend: WasabiBackendProtocol | None = None
         self.backend_architecture: BackendArchitecture | None = None
         self.round_ids: set[str] = set()
-        super().__init__(args, driver, "/home/wasabi/.walletwasabi/backend/")
+        super().__init__(args, driver, WASABI_CLIENT_DATA_PATH)
 
     def default_scenario(self) -> ScenarioConfig:
         return ScenarioConfig(
