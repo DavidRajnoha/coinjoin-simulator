@@ -747,6 +747,6 @@ class JoinmarketEngine(EngineBase):
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=5)
 def ensure_client_session(client, name):
-    if not client.session():
+    if not client.probe_session():
         print(f"- could not start {name} (session timeout)")
         raise Exception("Could not start distributor")
