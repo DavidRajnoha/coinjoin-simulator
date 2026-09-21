@@ -97,6 +97,12 @@ class KubernetesDriver(Driver):
             config.load_kube_config()
 
         self.client = client.CoreV1Api()
+        # stream() swaps ``ApiClient.request`` for a websocket call while it
+        # opens the exec connection. On a shared ApiClient that swap also
+        # catches every plain API call another thread makes at that moment
+        # (``read_namespaced_pod_status`` in a parallel download, say), so
+        # exec gets its own client and the swap cannot reach anything else.
+        self._exec_client = client.CoreV1Api(client.ApiClient())
         self._exec_lock = RLock()
         self._namespace = namespace
         self.reuse_namespace = reuse_namespace
@@ -458,11 +464,12 @@ class KubernetesDriver(Driver):
             raise RuntimeError(f"pod {name} is in phase {pod.status.phase}; exec requires Running")
 
     def _exec_stream(self, name, exec_command, action):
-        # stream() swaps ApiClient.request only until the connection is opened.
+        # stream() swaps ApiClient.request only until the connection is opened;
+        # the lock serialises that swap on the exec-only client.
         with self._exec_lock:
             try:
                 return stream(
-                    self.client.connect_get_namespaced_pod_exec,
+                    self._exec_client.connect_get_namespaced_pod_exec,
                     name,
                     self.namespace,
                     command=exec_command,

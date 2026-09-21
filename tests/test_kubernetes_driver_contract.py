@@ -27,6 +27,7 @@ def driver(**overrides: object) -> KubernetesDriver:
     instance = object.__new__(KubernetesDriver)
     instance.client = Mock()
     instance.client.read_namespaced_pod_status.return_value = running_pod()
+    instance._exec_client = Mock()  # pylint: disable=protected-access
     instance._exec_lock = RLock()  # pylint: disable=protected-access
     instance._namespace = "coinjoin"  # pylint: disable=protected-access
     instance.reuse_namespace = True
@@ -311,6 +312,32 @@ def test_exec_opens_connections_serially_but_keeps_streams_independent() -> None
     assert opening_second.is_set()
     assert first_stream is not second_stream
     assert first_stream.is_open() and second_stream.is_open()
+
+
+def test_exec_streams_open_on_a_client_no_plain_api_call_shares() -> None:
+    """stream() swaps ApiClient.request while it connects; a plain call on the same
+    client in another thread (the pod-status check of a parallel download) would be
+    routed into the websocket path and fail, so exec must use its own client."""
+    instance = driver()
+    opened_with = []
+
+    def open_stream(api_method, name, namespace, **kwargs):
+        opened_with.append(api_method)
+        return FakeStream()
+
+    with patch("manager.driver.kubernetes.stream", side_effect=open_stream):
+        instance._exec_stream("jcs-000", ["cat", "/logs"], "read logs")
+
+    assert opened_with == [instance._exec_client.connect_get_namespaced_pod_exec]
+    instance.client.connect_get_namespaced_pod_exec.assert_not_called()
+
+
+def test_a_fresh_driver_keeps_exec_and_plain_api_clients_apart() -> None:
+    with patch("manager.driver.kubernetes.config.load_kube_config"):
+        instance = KubernetesDriver(namespace="coinjoin")
+
+    assert instance._exec_client is not instance.client
+    assert instance._exec_client.api_client is not instance.client.api_client
 
 
 def test_exec_api_failure_includes_pod_and_action() -> None:

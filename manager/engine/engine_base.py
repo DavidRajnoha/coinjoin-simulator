@@ -388,8 +388,8 @@ class EngineBase:
         try:
             self.driver.download(client.name, self.log_src_path, client_path)
             print(f"- stored {client.name} logs, {self.log_src_path}, {client_path}")
-        except Exception:
-            print(f"- could not store {client.name} logs")
+        except Exception as e:
+            print(f"- could not store {client.name} logs: {e!r}")
 
     def log_run_path(self):
         requested_run_id = getattr(self.args, "run_id", "")
