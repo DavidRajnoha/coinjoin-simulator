@@ -49,6 +49,43 @@ def test_pods_and_services_are_labelled_with_the_run() -> None:
         MANAGED_BY_LABEL: MANAGED_BY_VALUE,
         "coinjoin.run-id": "run-42",
     }
+    assert "ownerReferences" not in manifest["metadata"]
+
+
+def test_in_cluster_controller_pod_owns_created_pods_and_services(monkeypatch) -> None:
+    monkeypatch.setenv("COINJOIN_OWNER_POD_NAME", "coinjoin-s3-run-42-abcde")
+    monkeypatch.setenv("COINJOIN_OWNER_POD_UID", "controller-uid")
+    monkeypatch.setenv("COINJOIN_OWNER_POD_NAMESPACE", "coinjoin")
+    instance = driver(in_cluster=True, run_id="run-42")
+    instance._wait_for_pod_ip = Mock(return_value="10.0.0.7")  # pylint: disable=protected-access
+
+    instance.run("btc-node", "btc-node:latest", ports={18443: 18443}, cpu=1.0, memory=512)
+
+    expected_owner = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "coinjoin-s3-run-42-abcde",
+        "uid": "controller-uid",
+    }
+    pod = instance.client.create_namespaced_pod.call_args.kwargs["body"]
+    service = instance.client.create_namespaced_service.call_args.kwargs["body"]
+    assert pod["metadata"]["ownerReferences"] == [expected_owner]
+    assert service["metadata"]["ownerReferences"] == [expected_owner]
+    assert pod["metadata"]["labels"]["coinjoin.run-id"] == "run-42"
+    assert service["metadata"]["labels"]["coinjoin.run-id"] == "run-42"
+
+
+@pytest.mark.parametrize("owner_namespace", ["", "other-namespace"])
+def test_controller_pod_owner_must_be_in_the_emulator_namespace(monkeypatch, owner_namespace) -> None:
+    monkeypatch.setenv("COINJOIN_OWNER_POD_NAME", "controller-pod")
+    monkeypatch.setenv("COINJOIN_OWNER_POD_UID", "controller-uid")
+    monkeypatch.setenv("COINJOIN_OWNER_POD_NAMESPACE", owner_namespace)
+    instance = driver(in_cluster=True)
+
+    with pytest.raises(ValueError, match="complete identity in the emulator namespace"):
+        instance.run("btc-node", "btc-node:latest", ports={}, cpu=1.0, memory=512)
+
+    instance.client.create_namespaced_pod.assert_not_called()
 
 
 def test_a_host_path_is_mounted_and_a_command_overrides_the_entrypoint() -> None:

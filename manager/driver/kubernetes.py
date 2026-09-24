@@ -179,6 +179,27 @@ class KubernetesDriver(Driver):
             labels[RUN_ID_LABEL] = self.run_id
         return labels
 
+    def owner_reference(self):
+        if not self.in_cluster:
+            return None
+        name = os.environ.get("COINJOIN_OWNER_POD_NAME")
+        uid = os.environ.get("COINJOIN_OWNER_POD_UID")
+        namespace = os.environ.get("COINJOIN_OWNER_POD_NAMESPACE")
+        if not any((name, uid, namespace)):
+            return None
+        if not all((name, uid, namespace)) or namespace != self._namespace:
+            raise ValueError(
+                "controller pod ownership requires a complete identity in the emulator namespace"
+            )
+        return {"apiVersion": "v1", "kind": "Pod", "name": name, "uid": uid}
+
+    def resource_metadata(self, name):
+        metadata = {"name": name, "labels": self.resource_labels(name)}
+        owner = self.owner_reference()
+        if owner:
+            metadata["ownerReferences"] = [owner]
+        return metadata
+
     def cleanup_selector(self):
         """Select this run's own resources, or every managed one when no run ID is set."""
         selector = f"{MANAGED_BY_LABEL}={MANAGED_BY_VALUE}"
@@ -212,7 +233,7 @@ class KubernetesDriver(Driver):
         return {
             "apiVersion": "v1",
             "kind": "Pod",
-            "metadata": {"name": name, "labels": self.resource_labels(name)},
+            "metadata": self.resource_metadata(name),
             "spec": {
                 "restartPolicy": "Never",
                 "containers": [
@@ -280,7 +301,7 @@ class KubernetesDriver(Driver):
         service_manifest = {
             "apiVersion": "v1",
             "kind": "Service",
-            "metadata": {"name": f"{name}", "labels": self.resource_labels(name)},
+            "metadata": self.resource_metadata(name),
             "spec": {
                 "type": "NodePort",
                 "selector": {"app": name},
