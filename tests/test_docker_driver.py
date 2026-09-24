@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from manager.driver import managed_label_filters, managed_labels
+from manager.driver import managed_label_filters, managed_labels, warn_if_host_ports_unreserved
 from manager.driver.docker import DockerDriver
 
 
@@ -160,3 +160,35 @@ def test_get_pod_resource_usage_returns_none_without_stats() -> None:
     )
 
     assert driver.get_pod_resource_usage("wasabi-client-000") is None
+
+
+@pytest.mark.parametrize(
+    ("reserved", "warned"),
+    [("", True), ("37127-37200", True), ("8080,37000-37300", False), ("37127-37260", False)],
+)
+def test_host_port_reservation_warning(tmp_path, capsys, reserved: str, warned: bool) -> None:
+    sysctl = tmp_path / "ip_local_reserved_ports"
+    sysctl.write_text(reserved + "\n", encoding="ascii")
+
+    warn_if_host_ports_unreserved(path=str(sysctl))
+
+    assert ("address already in use" in capsys.readouterr().out) is warned
+
+
+@pytest.mark.parametrize(("daemon_host", "warned"), [("tcp://dind:2375", False), ("unix:///var/run/docker.sock", True)])
+def test_host_port_reservation_warning_only_for_local_daemon(tmp_path, capsys, daemon_host: str, warned: bool) -> None:
+    sysctl = tmp_path / "ip_local_reserved_ports"
+    sysctl.write_text("\n", encoding="ascii")
+
+    warn_if_host_ports_unreserved(daemon_host, path=str(sysctl))
+
+    assert ("address already in use" in capsys.readouterr().out) is warned
+
+
+def test_host_port_warning_preserves_existing_reservations(tmp_path, capsys) -> None:
+    sysctl = tmp_path / "ip_local_reserved_ports"
+    sysctl.write_text("8080,45000-45010\n", encoding="ascii")
+
+    warn_if_host_ports_unreserved(path=str(sysctl))
+
+    assert "net.ipv4.ip_local_reserved_ports=8080,45000-45010,37127-37260" in capsys.readouterr().out

@@ -5,7 +5,14 @@ from io import BytesIO
 
 import docker
 
-from . import RESERVED_PORT_RANGE, RESERVED_PORTS_SYSCTL, Driver, managed_label_filters, managed_labels
+from . import (
+    RESERVED_PORT_RANGE,
+    RESERVED_PORTS_SYSCTL,
+    Driver,
+    managed_label_filters,
+    managed_labels,
+    warn_if_host_ports_unreserved,
+)
 
 BYTES_IN_MEGABYTE = 1024 * 1024
 
@@ -15,6 +22,7 @@ class DockerDriver(Driver):
         self.client: docker.DockerClient = docker.from_env()
         self._namespace = namespace
         self._run_id = run_id
+        warn_if_host_ports_unreserved(os.environ.get("DOCKER_HOST"))
 
     @cached_property
     def network(self):

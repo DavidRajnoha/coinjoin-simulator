@@ -7,7 +7,14 @@ import podman
 
 from manager.exceptions import CoinjoinEmulatorError
 
-from . import RESERVED_PORT_RANGE, RESERVED_PORTS_SYSCTL, Driver, managed_label_filters, managed_labels
+from . import (
+    RESERVED_PORT_RANGE,
+    RESERVED_PORTS_SYSCTL,
+    Driver,
+    managed_label_filters,
+    managed_labels,
+    warn_if_host_ports_unreserved,
+)
 
 
 class PodmanDriver(Driver):
@@ -15,6 +22,7 @@ class PodmanDriver(Driver):
         self._namespace = namespace
         self._run_id = run_id
         self.client = podman.PodmanClient()
+        warn_if_host_ports_unreserved(os.environ.get("CONTAINER_HOST"))
 
     @cached_property
     def network(self) -> str:
