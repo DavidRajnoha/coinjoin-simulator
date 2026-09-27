@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
+from manager.exceptions import RpcError
 from manager.wasabi_clients.wasabi_client_base import WasabiClientBase
 
 
@@ -51,6 +52,47 @@ def test_an_rpc_error_is_not_retried() -> None:
         return_value=ok({"error": "no such wallet"}),
     ) as post:
         with pytest.raises(Exception):
+            client().get_new_address()
+
+    assert post.call_count == 1
+
+
+RACE = {
+    "code": -32603,
+    "message": "Destination array was not long enough. Check the destination index, "
+    "length, and the array's lower bounds. (Parameter 'destinationArray')",
+}
+
+
+def test_a_new_address_survives_the_key_cache_race() -> None:
+    """Wasabi 2.6.0 races its synchronizer on the key cache; the retry gets the address."""
+    with patch(
+        "manager.wasabi_clients.wasabi_client_base.requests.post",
+        side_effect=[ok({"error": RACE}), ok({"result": {"address": "bcrt1qexample"}})],
+    ), patch("manager.wasabi_clients.wasabi_client_base.sleep") as slept:
+        assert client().get_new_address() == "bcrt1qexample"
+
+    slept.assert_called_once()
+
+
+def test_a_persisting_key_cache_race_still_fails() -> None:
+    with patch(
+        "manager.wasabi_clients.wasabi_client_base.requests.post",
+        return_value=ok({"error": RACE}),
+    ) as post, patch("manager.wasabi_clients.wasabi_client_base.sleep"):
+        with pytest.raises(RpcError):
+            client().get_new_address()
+
+    assert post.call_count == 3
+
+
+def test_other_internal_errors_are_not_retried() -> None:
+    """-32603 also carries deterministic failures such as an unloaded wallet."""
+    with patch(
+        "manager.wasabi_clients.wasabi_client_base.requests.post",
+        return_value=ok({"error": {"code": -32603, "message": "There is no wallet loaded."}}),
+    ) as post:
+        with pytest.raises(RpcError):
             client().get_new_address()
 
     assert post.call_count == 1

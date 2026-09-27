@@ -9,6 +9,20 @@ from manager.exceptions import RpcError
 WALLET_NAME = "wallet"
 
 RETRY_BACKOFF_SECONDS = 1
+JSON_RPC_INTERNAL_ERROR = -32603
+
+TRANSIENT_INTERNAL_ERRORS = (
+    "Destination array was not long enough",
+    "Collection was modified",
+)
+
+
+def _is_transient(error) -> bool:
+    return (
+        isinstance(error, dict)
+        and error.get("code") == JSON_RPC_INTERNAL_ERROR
+        and any(fragment in str(error.get("message", "")) for fragment in TRANSIENT_INTERNAL_ERRORS)
+    )
 
 
 class WasabiClientBase:
@@ -54,7 +68,11 @@ class WasabiClientBase:
                     sleep(RETRY_BACKOFF_SECONDS)
                 continue
             if "error" in response.json():
-                raise RpcError(response.json()["error"])
+                error = response.json()["error"]
+                if _is_transient(error) and attempt + 1 < repeat:
+                    sleep(RETRY_BACKOFF_SECONDS)
+                    continue
+                raise RpcError(error)
             if "result" in response.json():
                 return response.json()["result"]
             return None
