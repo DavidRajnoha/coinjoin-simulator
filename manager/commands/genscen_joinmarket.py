@@ -5,6 +5,7 @@ Generates customizable JoinMarket simulation configurations with takers and make
 """
 
 import json
+import math
 import random
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
@@ -291,6 +292,19 @@ def parse_list_float(s):
     return [float(x) for x in s.split(",") if x]
 
 
+def snap_to_grid(value, grid):
+    """Nearest grid value on a log scale (fees span orders of magnitude); 0 maps to the lowest.
+
+    Applied after the fee is drawn, so the random stream is consumed exactly as without a grid:
+    at equal seed a quantized scenario is the continuous one with only its fees snapped.
+    """
+    if not grid:
+        return value
+    if value <= 0:
+        return min(grid)
+    return min(grid, key=lambda g: abs(math.log(g) - math.log(value)))
+
+
 def parse_bool(s):
     return str(s).lower() in ("true", "1", "yes", "y")
 
@@ -407,6 +421,10 @@ def generate_fidelity_bond_config(args):
     }
 
 
+# manager.py-level and output-only arguments that say nothing about the scenario itself
+GENERATOR_ARGS_EXCLUDED = {"command", "engine", "driver", "no_logs", "in_cluster", "force", "out_dir"}
+
+
 def setup_parser(parser: argparse.ArgumentParser):
     parser.add_argument("--name", type=str, help="scenario name")
     parser.add_argument("--maker-count", type=int, default=30, help="number of makers")
@@ -418,6 +436,9 @@ def setup_parser(parser: argparse.ArgumentParser):
     parser.add_argument("--taker-delays", type=str, required=False, help="comma-separated block delays for takers, e.g. 0,10,30")
     parser.add_argument("--tumbler-taker-delays", type=str, required=False, help="comma-separated block delays for tumbler takers, e.g. 0,10,20,30")
     parser.add_argument("--taker-max-coinjoins", type=int, default=0, help="max coinjoins for standard takers (0 for unlimited)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="seed for every random draw (wallet funds, fees, bonds); recorded in the "
+                             "scenario so a replicate can be regenerated. Omit for an unseeded draw")
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.add_argument("--out-dir", type=str, default="scenarios/joinmarket", help="output directory")
     # FeeConfig
@@ -493,20 +514,39 @@ def setup_parser(parser: argparse.ArgumentParser):
                        help="wallet BTC amount quantiles (0%,20%,40%,60%,80%,100%) for makers")
     parser.add_argument("--taker-btc-quantiles", type=str, default="",
                        help="taker BTC amount quantiles (0%,20%,40%,60%,80%,100%). If not specified, uses wallet-btc-quantiles divided by 3")
+    parser.add_argument("--fee-absolute-grid", type=str, default="",
+                       help="quantize absolute maker fees (sats) to this public grid, e.g. 100,200,500; "
+                            "each drawn fee snaps to the log-nearest value. Empty = continuous fees")
+    parser.add_argument("--fee-relative-grid", type=str, default="",
+                       help="quantize relative maker fees to this public grid, e.g. 2e-5,5e-5,1e-4; "
+                            "each drawn fee snaps to the log-nearest value. Empty = continuous fees")
     parser.add_argument("--bond-amount-quantiles", type=str, default="10000,25000,50000,75000,100000,150000",
                        help="fidelity bond amount quantiles (0%,20%,40%,60%,80%,100%) in satoshis")
 
 
 def handler(args):
     print("Generating JoinMarket scenario...")
+    import random
+    import numpy as np
+    if args.seed is not None:
+        # Both generators are drawn from (random for wallets/fees, numpy for UTXO splits), so
+        # seeding only one would leave the scenario irreproducible.
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+    fee_absolute_grid = parse_list_int(args.fee_absolute_grid)
+    fee_relative_grid = parse_list_float(args.fee_relative_grid)
     scenario = {
         "name": args.name or f"tumbler_{args.tumbler_taker_count}_maker_{args.maker_count}",
         "default_version": "joinmarket",
         "rounds": args.round_count,
         "blocks": args.block_count,
+        # Provenance: the scenario file is copied into every run's log archive, so recording the
+        # seed and the generator arguments here keeps the configuration recoverable from results.
+        "seed": args.seed,
+        "generator": {k: v for k, v in sorted(vars(args).items())
+                      if k not in GENERATOR_ARGS_EXCLUDED and not callable(v)},
         "wallets": []
     }
-    import random
     SATOSHI = 100_000_000
     # AUTOMATIC LIQUIDITY BALANCING:
     # Scale down taker parameters to ensure they have less liquidity than makers
@@ -691,6 +731,7 @@ def handler(args):
         else:
             total_btc = random.uniform(args.wallet_min_total_btc, args.wallet_max_total_btc)
             cjfee_a = random.randint(args.maker_min_absolute_fee, args.maker_max_absolute_fee)
+        cjfee_a = int(snap_to_grid(cjfee_a, fee_absolute_grid))
 
         # Apply liquidity multiplier for bond makers to avoid dilution
         if is_bond_maker and args.bond_maker_extra_utxos:
@@ -739,6 +780,7 @@ def handler(args):
         else:
             total_btc = random.uniform(args.wallet_min_total_btc, args.wallet_max_total_btc)
             cjfee_r = round(random.uniform(args.maker_min_relative_fee, args.maker_max_relative_fee), 6)
+        cjfee_r = snap_to_grid(cjfee_r, fee_relative_grid)
 
         # Apply liquidity multiplier for bond makers to avoid dilution
         if is_bond_maker and args.bond_maker_extra_utxos:
