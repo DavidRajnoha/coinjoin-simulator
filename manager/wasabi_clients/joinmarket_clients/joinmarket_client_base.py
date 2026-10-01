@@ -97,25 +97,26 @@ class JoinMarketClientServer:
             self._client_initialized = False
 
     @classmethod
-    def from_wallet(cls, name: str, port: int, wallet: dict, host: str, proxy=""):
+    def from_wallet(cls, name: str, port: int, wallet: dict, host: str, proxy="", version="joinmarket"):
         type_ = wallet.get("type", "maker")
         tumbler_options = wallet.get("tumbler_options", {})
 
         # Check if wallet has fidelity bonds configured
         has_fidelity_bonds = wallet.get("fidelity_bond", {}).get("enabled", False)
 
-        # Select the appropriate subclass based on wallet config.
+        # Select the appropriate subclass based on wallet config and client implementation.
+        if version == "joinmarket-ng":
+            from manager.wasabi_clients.joinmarket_clients import joinmarket_ng_clients as impl
+            maker_cls, taker_cls, tumbler_cls = impl.NGMakerClient, impl.NGTakerClient, impl.NGTumblerTakerClient
+        else:
+            from manager.wasabi_clients.joinmarket_clients import joinmarket_clients as impl
+            maker_cls, taker_cls, tumbler_cls = impl.MakerClient, impl.TakerClient, impl.TumblerTakerClient
+
         if type_ == "maker":
-            from manager.wasabi_clients.joinmarket_clients.joinmarket_clients import MakerClient
-            client_cls = MakerClient
+            client_cls = maker_cls
         elif type_ == "taker":
             # Distinguish between a standard taker and a tumbler taker based on tumbler_options.
-            if tumbler_options:
-                from manager.wasabi_clients.joinmarket_clients.joinmarket_clients import TumblerTakerClient
-                client_cls = TumblerTakerClient
-            else:
-                from manager.wasabi_clients.joinmarket_clients.joinmarket_clients import TakerClient
-                client_cls = TakerClient
+            client_cls = tumbler_cls if tumbler_options else taker_cls
         else:
             client_cls = cls
 
@@ -123,6 +124,7 @@ class JoinMarketClientServer:
         client = client_cls(
             name=name,
             port=port,
+            version=version,
             type=type_,
             delay=(wallet.get("delay_blocks", 0), wallet.get("delay_rounds", 0)),
             stop=(wallet.get("stop_blocks", 0), wallet.get("stop_rounds", 0)),

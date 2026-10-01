@@ -6,6 +6,21 @@
 set -euo pipefail
 
 MODE=${MODE:-walletd}
+# irc       -> talk to the emulator irc-server (reference-only simulations)
+# directory -> join the joinmarket-ng directory server over plain TCP (mixed simulations)
+JM_MESSAGING=${JM_MESSAGING:-irc}
+JM_DIRECTORY_NODES=${JM_DIRECTORY_NODES:-jm-directory:5222}
+
+CFG_DIR=/home/joinmarket/.joinmarket
+CFG=$CFG_DIR/joinmarket.cfg
+
+if [ "$JM_MESSAGING" = "directory" ]; then
+  sed "s/@@DIRECTORY_NODES@@/$JM_DIRECTORY_NODES/" /home/joinmarket/messaging-onion.cfg > /tmp/messaging.cfg
+else
+  cp /home/joinmarket/messaging-irc.cfg /tmp/messaging.cfg
+fi
+cat /home/joinmarket/joinmarket.base.cfg /tmp/messaging.cfg > "$CFG"
+echo "joinmarket.cfg assembled with messaging=$JM_MESSAGING"
 
 if [ "$MODE" = "obwatch" ]; then
   # ── Orderbook watcher mode ─────────────────────────────────────────────

@@ -170,6 +170,9 @@ class OrderbookWatchClient(JoinMarketClientServer):
     and stores snapshots to disk under /tmp to avoid large memory usage.
     """
     def __init__(self, **kwargs):
+        # The joinmarket-ng watcher serves only /orderbook.json (no refresh / bonds endpoints)
+        self.supports_refresh = kwargs.pop("supports_refresh", True)
+        self.supports_bonds = kwargs.pop("supports_bonds", True)
         # Default port for ob-watcher is 62601 and it is plain HTTP (not HTTPS)
         super().__init__(**kwargs)
         self.ob_host = kwargs.get("host", self.host)
@@ -193,6 +196,8 @@ class OrderbookWatchClient(JoinMarketClientServer):
 
     def _fetch_fidelity_bonds(self):
         """Fetch fidelity bonds data for debugging"""
+        if not self.supports_bonds:
+            return None
         url = f"http://{self.ob_host}:{self.ob_port}/fidelitybonds"
         try:
             resp = requests.get(
@@ -262,6 +267,8 @@ class OrderbookWatchClient(JoinMarketClientServer):
 
     async def _refresh_orderbook_async(self):
         """Refresh the orderbook by calling the refreshorderbook endpoint."""
+        if not self.supports_refresh:
+            return True
         url = f"http://{self.ob_host}:{self.ob_port}/refreshorderbook"
         proxy_config = self.proxy if self.proxy else None
 
@@ -294,6 +301,8 @@ class OrderbookWatchClient(JoinMarketClientServer):
 
     async def _fetch_fidelity_bonds_async(self):
         """Async version of _fetch_fidelity_bonds using httpx"""
+        if not self.supports_bonds:
+            return None
         url = f"http://{self.ob_host}:{self.ob_port}/fidelitybonds"
         proxy_config = self.proxy if self.proxy else None
 

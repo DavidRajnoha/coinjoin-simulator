@@ -1,0 +1,44 @@
+{
+  "name": "mixed_basic",
+  "default_version": "joinmarket",
+  "rounds": 0,
+  "blocks": 40,
+  "wallets": [
+    {
+      "funds": [3000000, 2000000],
+      "type": "taker",
+      "version": "joinmarket-ng",
+      "offers": [{"mixdepth": 0, "amount_sats": 500000, "counterparties": 3}],
+      "max_coinjoins": 1
+    },
+    {
+      "funds": [3000000, 2000000],
+      "type": "taker",
+      "delay_blocks": 3,
+      "offers": [{"mixdepth": 0, "amount_sats": 500000, "counterparties": 4}],
+      "max_coinjoins": 1
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 1000, "cjfee_r": 0, "ordertype": "sw0absoffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 0, "cjfee_r": 0.0005, "ordertype": "sw0reloffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "version": "joinmarket-ng",
+      "offers": [{"txfee": 0, "cjfee_a": 1500, "cjfee_r": 0, "ordertype": "sw0absoffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "version": "joinmarket-ng",
+      "offers": [{"txfee": 0, "cjfee_a": 0, "cjfee_r": 0.001, "ordertype": "sw0reloffer", "minsize": 100000, "maxsize": 9000000}]
+    }
+  ]
+}

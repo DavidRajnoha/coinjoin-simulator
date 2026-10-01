@@ -1,5 +1,6 @@
 import backoff
 import asyncio
+import json
 import random
 
 from manager.engine.engine_base import EngineBase
@@ -10,12 +11,72 @@ import os
 import shutil
 SCENARIO = {
     "name": "default",
-    "default_version": "joinmarket",
+    "default_version": "joinmarket",  # "joinmarket" (reference client-server) or "joinmarket-ng"
     "rounds": 0,  # the number of coinjoins after which the simulation stops (0 for no limit)
     "blocks": 0,  # the number of mined blocks after which the simulation stops (0 for no limit)
     "wallets": [],
 }
 import sys
+
+NG_VERSION = "joinmarket-ng"
+
+# joinmarket-ng directory server (the message channel shared by NG and, in mixed runs, reference clients)
+NG_DIRECTORY_NAME = "jm-directory"
+NG_DIRECTORY_PORT = 5222
+NG_DIRECTORY_NODES = f"{NG_DIRECTORY_NAME}:{NG_DIRECTORY_PORT}"
+NG_DIRECTORY_ID = f"test:{NG_DIRECTORY_NAME}-{NG_DIRECTORY_PORT}"
+NG_NICK_AUTH_IDS = json.dumps({NG_DIRECTORY_NODES: NG_DIRECTORY_ID})
+NG_OBWATCH_PORT = 8000
+
+NG_CLIENT_ENV = {
+    "BITCOIN__BACKEND_TYPE": "descriptor_wallet",
+    "BITCOIN__RPC_URL": "http://btc-node:18443",
+    "BITCOIN__RPC_USER": "user",
+    "BITCOIN__RPC_PASSWORD": "password",
+    # reference JoinMarket announces regtest as "testnet" on the wire; NG follows suit
+    "NETWORK_CONFIG__NETWORK": "testnet",
+    "NETWORK_CONFIG__BITCOIN_NETWORK": "regtest",
+    "NETWORK_CONFIG__ALLOW_CLEARNET_CONNECTIONS": "true",
+    "NETWORK_CONFIG__DIRECTORY_SERVERS": NG_DIRECTORY_NODES,
+    "NETWORK_CONFIG__NICK_AUTH_DIRECTORY_IDS": NG_NICK_AUTH_IDS,
+    # simulated makers charge fees without fidelity bonds
+    "TAKER__BONDLESS_REQUIRE_ZERO_FEE": "false",
+    "TAKER__BONDLESS_MAKERS_ALLOWANCE": "0.125",
+    # Parity with the tuned reference joinmarket.cfg / plain yield generator, so NG takers see the
+    # same maker set as reference takers (NG defaults: 500 sats / 0.1% / public fee grid only,
+    # at most 15 inputs per maker, offers withdrawn for up to 600 s after every CoinJoin).
+    "TAKER__MAX_CJ_FEE_ABS": "100000",
+    "TAKER__MAX_CJ_FEE_REL": "0.01",
+    "TAKER__REQUIRE_QUANTIZED_CJ_FEES": "false",
+    # must stay > 0: sweeps size their miner fee from this cap before maker inputs are known
+    "TAKER__MAX_MAKER_UTXOS": "50",
+    "TAKER__MINIMUM_MAKERS": "4",
+    "TAKER__MAKER_TIMEOUT_SEC": "60",
+    "TAKER__ORDERBOOK_MIN_WAIT": "20",
+    "TAKER__TAKER_UTXO_AGE": "5",
+    "MAKER__OFFER_REANNOUNCE_DELAY_MAX": "0",
+    "MAKER__SIZE_FACTOR": "0",
+    "MAKER__MIN_CONFIRMATIONS": "1",
+    # the emulator funds makers into mixdepth 0 only; without merging, maxsize = largest single UTXO
+    "MAKER__ALLOW_MIXDEPTH_ZERO_MERGE": "true",
+    # history.csv confirmations are written by the bots' rescans (default 600 s)
+    "MAKER__RESCAN_INTERVAL_SEC": "60",
+    "TAKER__RESCAN_INTERVAL_SEC": "60",
+    # regtest pacing for the tumbler runner (production defaults wait 30 min / 6 confirmations);
+    # 5 confirmations between phases = taker_utxo_age, so the next phase never fails on PoDLE age
+    "TUMBLER__RETRY_DELAY_SECONDS": "30",
+    "TUMBLER__CONFIRMATION_POLL_INTERVAL": "5",
+    "TUMBLER__MIN_CONFIRMATIONS_BETWEEN_PHASES": "5",
+    "LOGGING__LEVEL": "DEBUG",
+    "LOGGING__SENSITIVE": "true",
+    "JMWALLETD_HOST": "0.0.0.0",
+}
+# privacy-enhanced offer factors are daemon settings in NG, not maker/start fields
+NG_OFFER_FACTOR_ENV = {
+    "txfee_factor": "MAKER__TXFEE_CONTRIBUTION_FACTOR",
+    "cjfee_factor": "MAKER__CJFEE_FACTOR",
+    "size_factor": "MAKER__SIZE_FACTOR",
+}
 
 
 
@@ -33,16 +94,39 @@ class JoinmarketEngine(EngineBase):
     def default_scenario(self):
         return SCENARIO
 
+    def wallet_version(self, wallet) -> str:
+        return wallet.get("version", self.scenario["default_version"])
+
+    @property
+    def directory_mode(self) -> bool:
+        """True when any joinmarket-ng wallet runs: everyone then talks over the NG directory server."""
+        return NG_VERSION in self.versions
+
     def prepare_images(self):
         print("Preparing images")
         self.prepare_image("btc-node")
         self.prepare_image("joinmarket-client-server")
-        self.prepare_image("irc-server")
+        if self.directory_mode:
+            self.prepare_image("joinmarket-ng")
+            self.prepare_image("joinmarket-ng-directory")
+            self.prepare_image("joinmarket-ng-obwatcher")
+        else:
+            self.prepare_image("irc-server")
 
 
     def start_engine_infrastructure(self):
         self.node.create_wallet("jm_wallet")
         print("- created jm_wallet in BitcoinCore")
+
+        if self.directory_mode:
+            self.start_directory_server()
+            print("- started joinmarket-ng directory server")
+            try:
+                self.start_ng_orderbook_watch()
+                print("- started joinmarket-ng orderbook watcher")
+            except Exception as e:
+                print(f"- could not start orderbook watcher ({e})")
+            return
 
         self.start_irc_server()
         print("- started irc-server")
@@ -53,6 +137,70 @@ class JoinmarketEngine(EngineBase):
             print("- started orderbook watcher")
         except Exception as e:
             print(f"- could not start orderbook watcher ({e})")
+
+    def start_directory_server(self):
+        try:
+            self.driver.run(
+                NG_DIRECTORY_NAME,
+                f"{self.args.image_prefix}joinmarket-ng-directory",
+                env={
+                    "NETWORK_CONFIG__NETWORK": "testnet",
+                    "DIRECTORY_SERVER__HOST": "0.0.0.0",
+                    "DIRECTORY_SERVER__PORT": str(NG_DIRECTORY_PORT),
+                    "DIRECTORY_SERVER__NICK_AUTH_DIRECTORY_ID": NG_DIRECTORY_ID,
+                    "LOGGING__LEVEL": "INFO",
+                },
+                ports={NG_DIRECTORY_PORT: NG_DIRECTORY_PORT},
+                cpu=0.5,
+                memory=512,
+                service_account="joinmarket",
+                run_as_user=1000,
+                run_as_group=1000,
+            )
+        except Exception as e:
+            print(f"- could not start {NG_DIRECTORY_NAME} ({e})")
+            raise Exception("Could not start joinmarket-ng directory server")
+
+    def start_ng_orderbook_watch(self):
+        name = "joinmarket-obwatch"
+        port = NG_OBWATCH_PORT
+        try:
+            ip, obwatch_ports, route = self.driver.run(
+                name,
+                f"{self.args.image_prefix}joinmarket-ng-obwatcher",
+                env={
+                    "NETWORK_CONFIG__NETWORK": "testnet",
+                    "NETWORK_CONFIG__ALLOW_CLEARNET_CONNECTIONS": "true",
+                    "DIRECTORY_NODES": NG_DIRECTORY_NODES,
+                    "NETWORK_CONFIG__NICK_AUTH_DIRECTORY_IDS": NG_NICK_AUTH_IDS,
+                    "ORDERBOOK_WATCHER__HTTP_HOST": "0.0.0.0",
+                    "ORDERBOOK_WATCHER__HTTP_PORT": str(port),
+                    "LOGGING__LEVEL": "INFO",
+                },
+                ports={port: port},
+                cpu=0.25,
+                memory=256,
+                service_account="joinmarket",
+                run_as_user=1000,
+                run_as_group=1000,
+                proxy=self.args.proxy
+            )
+        except Exception as e:
+            print(f"- could not start {name} ({e})")
+            raise Exception("Could not start joinmarket-ng orderbook watcher")
+
+        actual_port = port if self.args.proxy else (443 if route else obwatch_ports[port])
+        actual_ip = ip if self.args.proxy or self.args.in_cluster else (route if route else self.args.control_ip)
+        print(f"- started {name} at {actual_ip}:{actual_port}")
+
+        self.obwatch_client = OrderbookWatchClient(
+            name=name,
+            host=actual_ip,
+            port=actual_port,
+            type="orderbook",
+            supports_refresh=False,
+            supports_bonds=False,
+        )
 
 
     def start_irc_server(self):
@@ -82,7 +230,7 @@ class JoinmarketEngine(EngineBase):
             ip, distributor_node_ports, route = self.driver.run(
                 name,
                 f"{self.args.image_prefix}joinmarket-client-server",
-                env={},  # Add any necessary environment variables
+                env=self._reference_client_env(),
                 ports={28183: port},
                 cpu=1,
                 memory=1024,
@@ -258,27 +406,49 @@ class JoinmarketEngine(EngineBase):
         return client
 
 
+    def _reference_client_env(self) -> dict:
+        return {"JM_MESSAGING": "directory" if self.directory_mode else "irc",
+                "JM_DIRECTORY_NODES": NG_DIRECTORY_NODES}
+
+    def _ng_client_env(self, wallet) -> dict:
+        env = dict(NG_CLIENT_ENV)
+        offers = wallet.get("offers") or []
+        if wallet.get("type", "maker") == "maker" and offers:
+            for offer_key, env_key in NG_OFFER_FACTOR_ENV.items():
+                if offers[0].get(offer_key) is not None:
+                    env[env_key] = f"{float(offers[0][offer_key]):.2f}"
+        env.update(self.scenario.get("ng_env", {}))
+        env.update(wallet.get("ng_env", {}))
+        return {k: str(v) for k, v in env.items()}
+
     def start_client(self, idx: int, wallet=None):
         name = f"jcs-{idx:03}"
         port = 28184 + idx
-        # A reference tumbler grows to ~91 MiB over a long schedule and gets OOMKilled at
-        # the 64 Mi request (96 Mi limit); single-shot takers and makers stay well below it.
-        memory = 128 if (wallet or {}).get("tumbler_options") else 64
+        version = self.wallet_version(wallet or {})
+        if version == NG_VERSION:
+            # jmwalletd idles at ~80 MiB (python 3.14 + uvicorn); 128 fits a client with a
+            # wallet and one active session, and keeps large runs inside namespace quotas
+            image, env, cpu, memory = "joinmarket-ng", self._ng_client_env(wallet), 0.1, 128
+        else:
+            # A reference tumbler grows to ~91 MiB over a long schedule and gets OOMKilled at
+            # the 64 Mi request (96 Mi limit); single-shot takers and makers stay well below it.
+            memory = 128 if (wallet or {}).get("tumbler_options") else 64
+            image, env, cpu = "joinmarket-client-server", self._reference_client_env(), 0.05
         try:
-            print(f"Starting joinmarket-client-server: {name}")
+            print(f"Starting {image}: {name}")
             ip, client_node_ports, route = self.driver.run(
                 name,
-                f"{self.args.image_prefix}joinmarket-client-server",
-                env={},
+                f"{self.args.image_prefix}{image}",
+                env=env,
                 ports={28183: port},
-                cpu=(0.05),
+                cpu=cpu,
                 memory=memory,
                 service_account="joinmarket",
                 run_as_user=1000,
                 run_as_group=1000,
                 proxy=self.args.proxy
             )
-            print(f"Started joinmarket-client-server: {name}")
+            print(f"Started {image}: {name}")
         except Exception as e:
             print(f"- error starting {name}: {e}")
             return None
@@ -296,7 +466,8 @@ class JoinmarketEngine(EngineBase):
             port=actual_port,
             host=actual_ip,
             wallet=wallet,
-            proxy=self.args.proxy)
+            proxy=self.args.proxy,
+            version=version)
 
         print(f"driver starting {name}")
         return client

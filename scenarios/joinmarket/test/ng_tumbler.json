@@ -1,0 +1,52 @@
+{
+  "name": "ng_tumbler",
+  "default_version": "joinmarket-ng",
+  "rounds": 0,
+  "blocks": 150,
+  "wallets": [
+    {
+      "funds": [2000000, 1500000, 1000000],
+      "type": "taker",
+      "tumbler_options": {
+        "address_count": 2,
+        "maker_count_min": 3,
+        "maker_count_max": 4,
+        "time_lambda_seconds": 60,
+        "stage1_wait_multiplier": 1,
+        "include_maker_sessions": true,
+        "maker_session_seconds": 240,
+        "maker_session_idle_timeout_seconds": 120,
+        "mintxcount": 2,
+        "mincjamount_sats": 100000,
+        "max_phase_retries": 3,
+        "rounding_chance": 0,
+        "restart": true
+      }
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 1000, "cjfee_r": 0, "ordertype": "sw0absoffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 1500, "cjfee_r": 0, "ordertype": "sw0absoffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 2000, "cjfee_r": 0, "ordertype": "sw0absoffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 0, "cjfee_r": 0.0005, "ordertype": "sw0reloffer", "minsize": 100000, "maxsize": 9000000}]
+    },
+    {
+      "funds": [4000000, 3000000, 2000000, 2000000],
+      "type": "maker",
+      "offers": [{"txfee": 0, "cjfee_a": 0, "cjfee_r": 0.001, "ordertype": "sw0reloffer", "minsize": 100000, "maxsize": 9000000}]
+    }
+  ]
+}

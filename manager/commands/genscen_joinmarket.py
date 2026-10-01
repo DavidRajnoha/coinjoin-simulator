@@ -80,6 +80,26 @@ class TumblerOptions:
     rounding_sigfig_weights: List[int] = field(default_factory=lambda: [55, 15, 25, 65, 40])
 
 
+@dataclass
+class NGTumblerOptions:
+    """Tumbler options for joinmarket-ng takers (TumbleParameters names, simulation-fast defaults)"""
+    address_count: int = 3
+    maker_count_min: int = 4
+    maker_count_max: int = 6
+    time_lambda_seconds: float = 120.0
+    stage1_wait_multiplier: float = 1.0
+    include_maker_sessions: bool = True
+    maker_session_seconds: float = 300.0
+    maker_session_idle_timeout_seconds: float = 180.0
+    mintxcount: int = 2
+    mincjamount_sats: int = 35000
+    max_phase_retries: int = 3
+    rounding_chance: float = 0.0
+    rounding_sigfig_weights: List[int] = field(default_factory=lambda: [55, 15, 25, 65, 40])
+    restart: bool = True
+    max_plans: int = 0  # 0 = keep tumbling for the whole simulation
+
+
 class JoinMarketConfigGenerator:
     def __init__(self):
         self.fee_config = FeeConfig()
@@ -441,6 +461,27 @@ def setup_parser(parser: argparse.ArgumentParser):
                              "scenario so a replicate can be regenerated. Omit for an unseeded draw")
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.add_argument("--out-dir", type=str, default="scenarios/joinmarket", help="output directory")
+    # Client implementation (mixed populations: default_version + per-wallet "version")
+    parser.add_argument("--client-version", type=str, default="joinmarket", choices=["joinmarket", "joinmarket-ng"],
+                        help="default client implementation for all wallets")
+    parser.add_argument("--ng-makers", type=int, default=0, help="number of makers running joinmarket-ng (when default is joinmarket)")
+    parser.add_argument("--ng-takers", type=int, default=0, help="number of standard takers running joinmarket-ng (when default is joinmarket)")
+    parser.add_argument("--ng-tumbler-takers", type=int, default=0, help="number of tumbler takers running joinmarket-ng (when default is joinmarket)")
+    # joinmarket-ng tumbler options (TumbleParameters names)
+    parser.add_argument("--ng-tumbler-address-count", type=int, default=3, help="ng tumbler: number of destination addresses")
+    parser.add_argument("--ng-tumbler-maker-count-min", type=int, default=4, help="ng tumbler: maker_count_min")
+    parser.add_argument("--ng-tumbler-maker-count-max", type=int, default=6, help="ng tumbler: maker_count_max")
+    parser.add_argument("--ng-tumbler-time-lambda-seconds", type=float, default=120.0, help="ng tumbler: time_lambda_seconds")
+    parser.add_argument("--ng-tumbler-stage1-wait-multiplier", type=float, default=1.0, help="ng tumbler: stage1_wait_multiplier")
+    parser.add_argument("--ng-tumbler-include-maker-sessions", type=parse_bool, default=True, help="ng tumbler: include_maker_sessions (maker interludes)")
+    parser.add_argument("--ng-tumbler-maker-session-seconds", type=float, default=300.0, help="ng tumbler: maker_session_seconds")
+    parser.add_argument("--ng-tumbler-maker-session-idle-timeout-seconds", type=float, default=180.0, help="ng tumbler: maker_session_idle_timeout_seconds")
+    parser.add_argument("--ng-tumbler-mintxcount", type=int, default=2, help="ng tumbler: mintxcount")
+    parser.add_argument("--ng-tumbler-mincjamount-sats", type=int, default=35000, help="ng tumbler: mincjamount_sats")
+    parser.add_argument("--ng-tumbler-max-phase-retries", type=int, default=3, help="ng tumbler: max_phase_retries")
+    parser.add_argument("--ng-tumbler-rounding-chance", type=float, default=0.0, help="ng tumbler: rounding_chance")
+    parser.add_argument("--ng-tumbler-max-plans", type=int, default=0,
+                        help="ng tumbler: how many plans to run in sequence (0 = tumble for the whole simulation)")
     # FeeConfig
     parser.add_argument("--maker-min-absolute-fee", type=int, default=1000, help="minimum absolute fee (satoshis)")
     parser.add_argument("--maker-max-absolute-fee", type=int, default=5000, help="maximum absolute fee (satoshis)")
@@ -537,7 +578,7 @@ def handler(args):
     fee_relative_grid = parse_list_float(args.fee_relative_grid)
     scenario = {
         "name": args.name or f"tumbler_{args.tumbler_taker_count}_maker_{args.maker_count}",
-        "default_version": "joinmarket",
+        "default_version": args.client_version,
         "rounds": args.round_count,
         "blocks": args.block_count,
         # Provenance: the scenario file is copied into every run's log archive, so recording the
@@ -638,6 +679,25 @@ def handler(args):
             "amtmixdepths": args.tumbler_amtmixdepths,
             "rounding_chance": args.tumbler_rounding_chance,
             "rounding_sigfig_weights": parse_list_int(args.tumbler_rounding_sigfig_weights)
+        }
+
+    def default_ng_tumbler_options():
+        return {
+            "address_count": args.ng_tumbler_address_count,
+            "maker_count_min": args.ng_tumbler_maker_count_min,
+            "maker_count_max": args.ng_tumbler_maker_count_max,
+            "time_lambda_seconds": args.ng_tumbler_time_lambda_seconds,
+            "stage1_wait_multiplier": args.ng_tumbler_stage1_wait_multiplier,
+            "include_maker_sessions": args.ng_tumbler_include_maker_sessions,
+            "maker_session_seconds": args.ng_tumbler_maker_session_seconds,
+            "maker_session_idle_timeout_seconds": args.ng_tumbler_maker_session_idle_timeout_seconds,
+            "mintxcount": args.ng_tumbler_mintxcount,
+            "mincjamount_sats": args.ng_tumbler_mincjamount_sats,
+            "max_phase_retries": args.ng_tumbler_max_phase_retries,
+            "rounding_chance": args.ng_tumbler_rounding_chance,
+            "rounding_sigfig_weights": parse_list_int(args.tumbler_rounding_sigfig_weights),
+            "restart": args.tumbler_restart,
+            "max_plans": args.ng_tumbler_max_plans,
         }
     # TAKERS
     taker_delays = parse_delays(args.taker_delays, args.taker_count)
@@ -867,6 +927,21 @@ def handler(args):
             print(f"  Default factors: txfee={args.txfee_factor_min}-{args.txfee_factor_max}, " +
                   f"cjfee={args.cjfee_factor_min}-{args.cjfee_factor_max}, " +
                   f"size={args.size_factor_min}-{args.size_factor_max}")
+
+    # Client implementation per wallet (mixed populations) and NG tumbler options
+    default_is_ng = args.client_version == "joinmarket-ng"
+    standard_takers = [w for w in scenario["wallets"] if w["type"] == "taker" and "tumbler_options" not in w]
+    tumbler_takers = [w for w in scenario["wallets"] if "tumbler_options" in w]
+    maker_wallets = [w for w in scenario["wallets"] if w["type"] == "maker"]
+    if not default_is_ng:
+        for w in standard_takers[:args.ng_takers] + tumbler_takers[:args.ng_tumbler_takers] + maker_wallets[:args.ng_makers]:
+            w["version"] = "joinmarket-ng"
+    for w in tumbler_takers:
+        if w.get("version", args.client_version) == "joinmarket-ng":
+            w["tumbler_options"] = default_ng_tumbler_options()
+    ng_wallets = [w for w in scenario["wallets"] if w.get("version", args.client_version) == "joinmarket-ng"]
+    if ng_wallets:
+        print(f"- {len(ng_wallets)}/{len(scenario['wallets'])} wallets run joinmarket-ng (messaging via directory server)")
 
     # Calculate and display bond statistics
     wallets_with_bonds = [w for w in scenario["wallets"] if w.get("fidelity_bond", {}).get("enabled", False)]

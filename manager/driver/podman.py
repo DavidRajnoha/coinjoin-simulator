@@ -92,7 +92,7 @@ class PodmanDriver(Driver):
         for container in docker.from_env().containers.list():
             if any(
                 x in container.attrs["Config"]["Image"]
-                for x in ("irc-server", "btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server")
+                for x in ("irc-server", "btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server", "joinmarket-ng")
             ):
                 containers.append(container)
                 

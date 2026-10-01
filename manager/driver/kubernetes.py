@@ -290,7 +290,14 @@ class KubernetesDriver(Driver):
                 print("Extracting")
                 tar.extractall(dst_path)
 
-        # Wait for required files to appear in dst_path
+        # Wait for required files to appear in dst_path.
+        # The filenames below (TUMBLE.log, J*.log, yigen-statement.csv) only exist for the
+        # reference joinmarket-clientserver. A joinmarket-ng client never writes them, so it
+        # would always burn the full timeout here - ~2 hours across 59 NG clients.
+        if "joinmarket-ng" in src_path:
+            print(f"Skipping reference log wait for {dst_path} (joinmarket-ng data directory)")
+            return
+
         import glob
         import time
         start_time = time.time()
@@ -468,7 +475,7 @@ class KubernetesDriver(Driver):
             if any(
                     x in pod.metadata.name
                     for x in ("irc-server", "btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server",
-                              "joinmarket-distributor", "jcs", "joinmarket-obwatch")
+                              "joinmarket-distributor", "jcs", "joinmarket-obwatch", "jm-directory")
             ):
                 try:
                     print(f"Deleting pod {pod.metadata.name}")
@@ -487,7 +494,7 @@ class KubernetesDriver(Driver):
             if any(
                     x in service.metadata.name
                     for x in ("irc-server", "btc-node", "wasabi-backend", "wasabi-client", "joinmarket-client-server",
-                              "joinmarket-distributor", "jcs", "joinmarket-obwatch")
+                              "joinmarket-distributor", "jcs", "joinmarket-obwatch", "jm-directory")
             ):
                 try:
                     print("Deleting service", service.metadata.name)

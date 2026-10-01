@@ -11,6 +11,14 @@ RUN apt-get update -qq && \
         socat ca-certificates iproute2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Onion messaging "testing mode" (regtest_count != 0,0) dials directory nodes over plain TCP but
+# advertises the bot's location as 127.0.0.1:<port>, which the joinmarket-ng directory server
+# rejects (it only accepts *.onion or NOT-SERVING-ONION). That address is unreachable to peers
+# anyway, so advertise NOT-SERVING-ONION: all private messages are relayed via the directory.
+RUN sed -i 's/self.onion_hostname = "127.0.0.1"/self.onion_hostname = NOT_SERVING_ONION_HOSTNAME/' \
+        /jm/clientserver/src/jmdaemon/onionmc.py \
+    && grep -q "self.onion_hostname = NOT_SERVING_ONION_HOSTNAME" /jm/clientserver/src/jmdaemon/onionmc.py
+
 # When the maker chosen to broadcast does not, the taker pushes the transaction itself; if that
 # also fails (typically a mempool conflict: a maker's coin was already spent in a concurrent
 # coinjoin), handle_unbroadcast_transaction only logs "Failed to broadcast transaction" and never
@@ -41,10 +49,14 @@ RUN mkdir -p /home/joinmarket/.joinmarket/ssl \
 RUN python3 /jm/clientserver/scripts/wallet-tool.py generate; exit 0
 
 COPY --chown=joinmarket:joinmarket run.sh /home/joinmarket/
-COPY --chown=joinmarket:joinmarket joinmarket.cfg /home/joinmarket/.joinmarket/
+# run.sh assembles ~/.joinmarket/joinmarket.cfg = base + messaging fragment at start
+COPY --chown=joinmarket:joinmarket joinmarket.cfg /home/joinmarket/joinmarket.base.cfg
+COPY --chown=joinmarket:joinmarket messaging-irc.cfg messaging-onion.cfg /home/joinmarket/
 RUN chmod +x /home/joinmarket/run.sh
 WORKDIR /home/joinmarket
 
 ENV MODE=walletd
+ENV JM_MESSAGING=irc
+ENV JM_DIRECTORY_NODES=jm-directory:5222
 
 CMD ["./run.sh"]
