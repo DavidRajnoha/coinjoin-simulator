@@ -14,6 +14,15 @@ The images are cached and need to be rebuilt to apply changes to the configurati
 ### Changes from the default Joinmarket configuration (that affect the wallet behavior):    
 - The `maker_timeout` value is set to 30 seconds (default 60 seconds). This value is also used to calculate the tumbler restart timer. Tumbler restart = maker_timeout * 20 (5 minutes).
 
+### Patches to the JoinMarket code (applied in `containers/joinmarket-client-server/Dockerfile`)
+- **Taker recovers from a failed fallback broadcast** (since Sep 2026). When the maker chosen to
+  broadcast does not and the taker's own push then fails (typically a mempool conflict: a maker's
+  coin was already spent in a concurrent coinjoin), upstream `handle_unbroadcast_transaction` only
+  logs `Failed to broadcast transaction` and never finishes the attempt, so a tumbler hangs for the
+  rest of the run. The patch reports the attempt as failed, as `Taker.push()` already does, so the
+  tumbler logs `possible mempool conflict` and retries the entry with new makers. Runs before
+  Sep 2026 do not have it: in the 2025 campaign 1–3 tumblers per 1000-block run stopped this way.
+
 ### Supported Features
 - Makers running yield generator.
 - Takers creating coinjoin transactions (repeated in fixed time intervals).

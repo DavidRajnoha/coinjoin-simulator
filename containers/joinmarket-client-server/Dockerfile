@@ -11,6 +11,24 @@ RUN apt-get update -qq && \
         socat ca-certificates iproute2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# When the maker chosen to broadcast does not, the taker pushes the transaction itself; if that
+# also fails (typically a mempool conflict: a maker's coin was already spent in a concurrent
+# coinjoin), handle_unbroadcast_transaction only logs "Failed to broadcast transaction" and never
+# reports the attempt as finished. The daemon then stays "taker running" forever and a tumbler
+# stops for the rest of the run (1-3 tumblers per 1000-block run in the 2025 campaign).
+# Report the failure the way Taker.push() already does for an immediate self-push failure, so the
+# tumbler takes its own "possible mempool conflict" path and retries the entry with new makers.
+RUN python3 - <<'EOF'
+p = "/jm/clientserver/src/jmclient/taker.py"
+s = open(p).read()
+old = '''                jlog.error("Failed to broadcast transaction: ")
+                jlog.info(btc.human_readable_transaction(tx))
+'''
+assert s.count(old) == 1, "taker.py changed upstream; re-check the unbroadcast patch"
+s = s.replace(old, old + "                self.on_finished_callback(False, fromtx=True)\n")
+open(p, "w").write(s)
+EOF
+
 RUN useradd -ms /bin/sh joinmarket
 USER 1000:1000
 
