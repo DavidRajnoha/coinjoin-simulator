@@ -248,9 +248,17 @@ class EngineBase:
                 else:
                     print(f"- stored {client.name} fidelity bonds (none)")
 
+        # Client implementations may expose additional ground truth (e.g. history, tumbler plan)
+        if hasattr(client, "export_ground_truth"):
+            try:
+                client.export_ground_truth(client_path)
+            except Exception as e:
+                print(f"- could not export ground truth for {client.name}: {e}")
+
+        log_src_path = getattr(client, "log_src_path", self.log_src_path)
         try:
-            self.driver.download(client.name, self.log_src_path, client_path)
-            print(f"- stored {client.name} logs, {self.log_src_path}, {client_path}")
+            self.driver.download(client.name, log_src_path, client_path)
+            print(f"- stored {client.name} logs, {log_src_path}, {client_path}")
         except:
             print(f"- could not store {client.name} logs")
 
