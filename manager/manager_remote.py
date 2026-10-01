@@ -256,6 +256,9 @@ def main():
         parser.print_help()
         return 1
 
+    print("note: manager/remote_cli.py is the unified entrypoint and handles both "
+          "single and batch runs; this CLI still works.", file=sys.stderr)
+
     # Route to appropriate function
     if args.command == "deploy":
         success = deploy_manager(args)

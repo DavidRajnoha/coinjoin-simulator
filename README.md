@@ -106,3 +106,46 @@ Running the simulation on a remote cluster using pre-existing namespace and a pr
 ```bash
 python manager.py run --driver kubernetes --namespace custom-coinjoin-ns --reuse-namespace --image-prefix "crocsmuni/" --proxy "socks5://127.0.0.1:8123" --scenario "scenarios/uniform-dynamic-500-30utxo.json"
 ```
+
+#### Running from an in-cluster orchestrator
+
+The command above drives the simulation from your machine, so it has to stay
+connected for the whole run. For long runs, deploy the orchestrator into the
+cluster instead and control it with `manager/remote_cli.py`. The orchestrator
+runs `manager.py` for you inside the cluster, so a dropped laptop connection
+does not end the simulation.
+
+```bash
+# once per namespace
+python manager/remote_cli.py --namespace NS deploy --image-prefix "drajnoha/"
+
+# one simulation
+python manager/remote_cli.py --namespace NS run --scenario /app/scenarios/joinmarket/test/ng_basic.json
+
+# or a batch: every *.json in the directory, in sorted order, with cleanup between
+python manager/remote_cli.py --namespace NS run --scenario-dir /app/scenarios/joinmarket/test/batch_short
+```
+
+Paths passed to `run` are paths *inside* the orchestrator container (the repo is
+baked into the image at `/app`), not paths on your machine.
+
+Once a run is started, the remaining commands find it automatically — you do not
+need to say whether it was a single run or a batch:
+
+| Command | Effect |
+| --- | --- |
+| `status` | progress of the active run (batch: which scenario, how many done) |
+| `logs -f` | stream the run's output |
+| `skip` | batch only: abandon the current scenario, continue with the next |
+| `stop` | stop the run (batch: the whole batch) |
+| `download-logs -n 3` | fetch the last 3 finished simulation archives |
+| `collect-logs` | break-glass: pull logs straight from the pods after a crash |
+
+`collect-logs` exists for the case where the simulation died before it could
+store its own logs. It talks only to `kubectl`, so it still works when the
+normal log path is the thing that broke. Add `--blocks` to also dump the chain
+(slow: one RPC per block).
+
+> **Note:** finished run archives are written to `/app/logs` inside the
+> orchestrator, which is *not* persistent — download them before the pod
+> restarts. Only `/workspace` survives a restart.

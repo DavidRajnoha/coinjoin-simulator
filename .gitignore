@@ -11,3 +11,4 @@ logs_download
 .simulation*
 .runner*
 *.logs
+.run-*

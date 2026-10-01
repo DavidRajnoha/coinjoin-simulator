@@ -22,7 +22,7 @@ class ScenarioRunner:
                  namespace: str = "rajnoha-ns",
                  image_prefix: str = "drajnoha/",
                  proxy: str = "socks5://127.0.0.1:8123",
-                 shadowsocks_config: str = "/home/drajnoha/Code/PycharmProjects/coinjoin-simulator/shadowsocks/config_local.yaml",
+                 shadowsocks_config: str = None,
                  cleanup_wait: int = 150,
                  in_cluster: bool = False):
 
@@ -396,11 +396,12 @@ def main():
     parser = argparse.ArgumentParser(description="Run JoinMarket scenarios")
     parser.add_argument("--scenario_dir", help="Directory containing scenario JSON files")
     parser.add_argument("--namespace", default="rajnoha-ns", help="Kubernetes namespace")
-    parser.add_argument("--in-cluster", action="store_true", default="False", help="When scenario runner is running in cluster")
+    parser.add_argument("--in-cluster", action="store_true", help="When scenario runner is running in cluster")
     parser.add_argument("--image-prefix", default="drajnoha/", help="Docker image prefix")
     parser.add_argument("--proxy", default="socks5://127.0.0.1:8123", help="Proxy URL")
     parser.add_argument("--shadowsocks-config",
-                        default="/home/drajnoha/Code/PycharmProjects/coinjoin-simulator/shadowsocks/config_local.yaml",
+                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "shadowsocks", "config_local.yaml"),
                         help="Shadowsocks config file")
     parser.add_argument("--cleanup-wait", type=int, default=90,
                         help="Seconds to wait after cleanup")
