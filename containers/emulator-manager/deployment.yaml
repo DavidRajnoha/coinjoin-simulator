@@ -33,10 +33,10 @@ spec:
         resources:
           limits:
             cpu: 2000m
-            memory: 2Gi
+            memory: 6Gi
           requests:
             cpu: 500m
-            memory: 512Mi
+            memory: 2Gi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -54,5 +54,10 @@ spec:
         workingDir: /app
       serviceAccountName: emulation-manager
       volumes:
-      - emptyDir: {}
-        name: workspace
+      - name: workspace
+#        emptyDir: {}
+        # To enable persistent storage across crashes:
+        # 1. Create PVC: kubectl apply -f containers/emulator-manager/pvc.yaml
+        # 2. Uncomment below and comment out emptyDir above
+        persistentVolumeClaim:
+         claimName: emulation-manager-workspace

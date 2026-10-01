@@ -9,3 +9,5 @@ scenarios/joinmarket/test
 scenarios/joinmarket/basic
 logs_download
 .simulation*
+.runner*
+*.logs

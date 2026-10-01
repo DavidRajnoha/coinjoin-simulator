@@ -10,6 +10,8 @@ import time
 import json
 import argparse
 import signal
+import threading
+import psutil
 from datetime import datetime
 from typing import List, Tuple, Optional
 
@@ -37,6 +39,8 @@ class ScenarioRunner:
         self.stop_requested = False
         self.skip_requested = False
         self.current_process = None  # Track currently running subprocess
+        self.memory_monitor_stop = threading.Event()
+        self.memory_monitor_thread = None
 
         # Register signal handlers
         signal.signal(signal.SIGTERM, self._handle_stop_signal)   # Terminate entire run
@@ -73,6 +77,54 @@ class ScenarioRunner:
             except ProcessLookupError:
                 # Process already terminated
                 pass
+
+    def _monitor_memory(self):
+        """Background thread to monitor memory usage every 30 seconds"""
+        process = psutil.Process()
+        memory_log_file = "/workspace/memory_usage.log"
+
+        while not self.memory_monitor_stop.is_set():
+            try:
+                mem_info = process.memory_info()
+                mem_mb = mem_info.rss / (1024 * 1024)  # RSS in MB
+                mem_percent = process.memory_percent()
+
+                # Get system-wide memory info
+                sys_mem = psutil.virtual_memory()
+                sys_mem_used_mb = sys_mem.used / (1024 * 1024)
+                sys_mem_total_mb = sys_mem.total / (1024 * 1024)
+
+                log_msg = f"[MEMORY] {self.get_timestamp()} Process: {mem_mb:.1f} MB ({mem_percent:.1f}%), System: {sys_mem_used_mb:.0f}/{sys_mem_total_mb:.0f} MB ({sys_mem.percent:.1f}%)"
+                print(log_msg)
+
+                # Also write to persistent file to survive crashes
+                try:
+                    with open(memory_log_file, "a") as f:
+                        f.write(log_msg + "\n")
+                        f.flush()
+                except Exception as write_err:
+                    print(f"[MEMORY] Error writing to log file: {write_err}")
+
+            except Exception as e:
+                print(f"[MEMORY] Error getting memory stats: {e}")
+
+            # Wait 30 seconds or until stop is signaled
+            self.memory_monitor_stop.wait(30)
+
+    def _start_memory_monitor(self):
+        """Start the memory monitoring thread"""
+        if self.memory_monitor_thread is None or not self.memory_monitor_thread.is_alive():
+            self.memory_monitor_stop.clear()
+            self.memory_monitor_thread = threading.Thread(target=self._monitor_memory, daemon=True)
+            self.memory_monitor_thread.start()
+            print("[MEMORY] Memory monitoring started (logging every 30 seconds)")
+
+    def _stop_memory_monitor(self):
+        """Stop the memory monitoring thread"""
+        if self.memory_monitor_thread and self.memory_monitor_thread.is_alive():
+            self.memory_monitor_stop.set()
+            self.memory_monitor_thread.join(timeout=2)
+            print("[MEMORY] Memory monitoring stopped")
 
     def _write_current_status(self):
         """Write current status to a file for external monitoring"""
@@ -153,27 +205,44 @@ class ScenarioRunner:
         start_time = time.time()
 
         try:
-            # Run the scenario
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Run the scenario with non-buffering output
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
             self.current_process = process  # Track the current process
 
-            # Stream output in real-time
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    print(f"  {line.rstrip()}")
+            # Helper function to stream output from a pipe
+            def stream_output(pipe, prefix):
+                try:
+                    for line in iter(pipe.readline, ''):
+                        if line:
+                            print(f"{prefix}{line.rstrip()}", flush=True)
+                except Exception as e:
+                    print(f"[ERROR] Stream exception: {e}", flush=True)
+                finally:
+                    pipe.close()
 
-            # Wait for completion
+            # Create threads to stream both stdout and stderr in real-time
+            # This prevents memory accumulation in subprocess.PIPE buffers
+            stdout_thread = threading.Thread(target=stream_output, args=(process.stdout, "  "), daemon=True)
+            stderr_thread = threading.Thread(target=stream_output, args=(process.stderr, "  [ERR] "), daemon=True)
+
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # Wait for process completion
             return_code = process.wait()
             duration = time.time() - start_time
+
+            # Wait for output threads to finish (with timeout to prevent hanging)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+
             self.current_process = None  # Clear when done
 
             if return_code == 0:
                 print(f"[{self.get_timestamp()}] SUCCESS: Scenario completed in {duration:.1f} seconds")
                 return True, duration
             else:
-                stderr = process.stderr.read()
-                print(f"[{self.get_timestamp()}] ERROR: Scenario failed after {duration:.1f} seconds")
-                print(f"STDERR: {stderr}")
+                print(f"[{self.get_timestamp()}] ERROR: Scenario failed after {duration:.1f} seconds (exit code: {return_code})")
                 return False, duration
 
         except Exception as e:
@@ -225,6 +294,9 @@ class ScenarioRunner:
                     break
 
         try:
+            # Start memory monitoring
+            self._start_memory_monitor()
+
             # Initial cleanup
             print("\nPerforming initial cleanup...")
             self.cleanup_kubernetes()
@@ -291,6 +363,9 @@ class ScenarioRunner:
             print(f"\n[{self.get_timestamp()}] Interrupted by user (Ctrl+C)")
             self.stop_requested = True
         finally:
+            # Stop memory monitoring
+            self._stop_memory_monitor()
+
             # Final cleanup
             print(f"\n[{self.get_timestamp()}] Performing final cleanup...")
             self.cleanup_kubernetes()
