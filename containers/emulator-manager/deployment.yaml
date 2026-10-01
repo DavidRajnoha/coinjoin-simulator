@@ -51,6 +51,12 @@ spec:
         volumeMounts:
         - mountPath: /workspace
           name: workspace
+        # manager.py stores run archives under ./logs (= /app/logs); without this mount they sit
+        # on the container's overlay and are lost on any pod restart, OOMKill or rollout.
+        # /workspace/logs must exist and be owned by uid 1000 before the first start.
+        - mountPath: /app/logs
+          name: workspace
+          subPath: logs
         workingDir: /app
       serviceAccountName: emulation-manager
       volumes:
