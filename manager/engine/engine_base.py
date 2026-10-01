@@ -15,6 +15,7 @@ import datetime
 DISTRIBUTOR_UTXOS = 200
 BATCH_SIZE = 5  # Reduced from 5 to 1 to prevent UTXO race conditions
 BTC = 100_000_000
+LOG_DOWNLOAD_WORKERS = 8
 
 
 class EngineBase:
@@ -285,7 +286,10 @@ class EngineBase:
         print("- finished storing engine logs")
 
         print(f"- storing logs for {len(self.clients)} clients in parallel")
-        with multiprocessing.pool.ThreadPool() as pool:
+        # Bounded: each concurrent download holds a websocket and spools an archive, so an
+        # unbounded pool (one worker per CPU) makes peak memory and API-server load scale with
+        # the machine rather than with anything we control.
+        with multiprocessing.pool.ThreadPool(LOG_DOWNLOAD_WORKERS) as pool:
             pool.starmap(self.store_client_logs, [(client, data_path) for client in self.clients])
 
         shutil.make_archive(experiment_path, "zip", *os.path.split(experiment_path))

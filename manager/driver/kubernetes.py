@@ -1,4 +1,6 @@
 import base64
+import tempfile
+import threading
 import traceback
 from functools import cached_property
 from io import BytesIO
@@ -24,10 +26,24 @@ class KubernetesDriver(Driver):
             config.load_kube_config()
 
         self.client = client.CoreV1Api()
+        # kubernetes.stream.stream() swaps ApiClient.request for a websocket transport and
+        # restores it afterwards. Concurrent exec calls (log gathering runs in a ThreadPool)
+        # interleave those save/restore pairs, which can leave the websocket transport
+        # installed permanently and break every later REST call - notably the pod listing in
+        # cleanup(). Keep exec traffic on its own per-thread client so self.client stays REST.
+        self._stream_clients = threading.local()
         self._namespace = namespace
         self.reuse_namespace = reuse_namespace
         self.pull_secret_path = pull_secret_path
         self.in_cluster = in_cluster
+
+    def _stream_api(self):
+        """Return a CoreV1Api dedicated to this thread's exec/stream calls."""
+        api = getattr(self._stream_clients, "api", None)
+        if api is None:
+            api = client.CoreV1Api(client.ApiClient())
+            self._stream_clients.api = api
+        return api
 
     def _create_image_pull_secret(self):
         secret_name = "regcred"
@@ -229,7 +245,7 @@ class KubernetesDriver(Driver):
             "-C", src_parent, src_target
         ]
         resp = stream(
-            self.client.connect_get_namespaced_pod_exec,
+            self._stream_api().connect_get_namespaced_pod_exec,
             name,
             self.namespace,
             command=exec_command,
@@ -241,20 +257,38 @@ class KubernetesDriver(Driver):
         )
         print("Opening connection")
 
-        fo = BytesIO()
-        while resp.is_open():
-            print("Updating stream")
-            resp.update(timeout=10)
-            if resp.peek_stdout():
-                fo.write(resp.read_stdout().encode())
-        print("")
-        fo.seek(0)
-        print("Closing connection")
-        resp.close()
+        # Spool the archive to disk rather than memory: a BytesIO here holds the pod's whole
+        # data directory, and log gathering downloads several pods at once, so peak usage was
+        # workers x archive size. That OOMKilled the manager during a 136-client teardown.
+        with tempfile.NamedTemporaryFile(suffix=".tar") as fo:
+            # tar warns on stderr about every file it skipped (--ignore-failed-read) or that
+            # changed mid-read. Print those warnings: discarding the stream would make any such
+            # loss invisible in the manager log.
+            warnings = []
+            try:
+                while resp.is_open():
+                    print("Updating stream")
+                    resp.update(timeout=10)
+                    if resp.peek_stdout():
+                        fo.write(resp.read_stdout().encode())
+                    if resp.peek_stderr():
+                        warnings.append(resp.read_stderr())
+            finally:
+                # A truncated tar (files changing mid-read) makes the extract below raise;
+                # closing here keeps that from leaking the websocket connection.
+                print("Closing connection")
+                resp.close()
+            print("")
+            if warnings:
+                for line in "".join(warnings).splitlines():
+                    if line.strip():
+                        print(f"!! tar warning for {name}:{src_path}: {line.strip()}")
+            fo.flush()
+            fo.seek(0)
 
-        with tarfile.open(fileobj=fo) as tar:
-            print("Extracting")
-            tar.extractall(dst_path)
+            with tarfile.open(fileobj=fo) as tar:
+                print("Extracting")
+                tar.extractall(dst_path)
 
         # Wait for required files to appear in dst_path
         import glob
@@ -298,7 +332,7 @@ class KubernetesDriver(Driver):
     def peek(self, name, path):
         exec_command = ["cat", path]
         resp = stream(
-            self.client.connect_get_namespaced_pod_exec,
+            self._stream_api().connect_get_namespaced_pod_exec,
             name,
             self.namespace,
             command=exec_command,
@@ -326,7 +360,7 @@ class KubernetesDriver(Driver):
             # Read process memory info from /proc
             exec_command = ["cat", "/proc/self/status"]
             resp = stream(
-                self.client.connect_get_namespaced_pod_exec,
+                self._stream_api().connect_get_namespaced_pod_exec,
                 name,
                 self.namespace,
                 command=exec_command,
@@ -380,7 +414,7 @@ class KubernetesDriver(Driver):
 
         exec_command = ["tar", "xf", "-", "-C", "/"]
         resp = stream(
-            self.client.connect_get_namespaced_pod_exec,
+            self._stream_api().connect_get_namespaced_pod_exec,
             name,
             self.namespace,
             command=exec_command,
@@ -405,20 +439,29 @@ class KubernetesDriver(Driver):
         resp.close()
 
 
-    def cleanup(self, image_prefix=""):
-        # without this, the cleaunup fails because of open websocket channel from log gathering
-        # but when the fresh client is created, the log gathering fails...
-        # "Working" config is letting the cleanup fail and restarting it after run...
-        # fresh_client = client.CoreV1Api()
-        # self.client = fresh_client
-        # return
+    def _list_with_retry(self, list_method_name):
+        """List namespaced resources, rebuilding the API client once on failure.
 
-        try:
-            pods = self.client.list_namespaced_pod(namespace=self._namespace)
-        except ApiException as e:
-            print("Error listing pods:", e)
-            traceback.print_exc()
-            print("Cleanup failed")
+        Exec traffic runs on separate clients (see _stream_api), so self.client should
+        stay usable. This retry is the safety net: a failure here used to abandon the
+        whole cleanup and leave every pod of a large run holding the namespace quota.
+        """
+        for attempt in (1, 2):
+            try:
+                return getattr(self.client, list_method_name)(namespace=self._namespace)
+            except ApiException as e:
+                print(f"Error listing ({list_method_name}, attempt {attempt}):", e)
+                traceback.print_exc()
+                if attempt == 1:
+                    print("Retrying with a fresh API client")
+                    self.client = client.CoreV1Api(client.ApiClient())
+        return None
+
+    def cleanup(self, image_prefix=""):
+        pods = self._list_with_retry("list_namespaced_pod")
+        if pods is None:
+            print("Cleanup failed: could not list pods; "
+                  f"delete leftovers manually in namespace {self._namespace}")
             return
 
         for pod in pods.items:
@@ -435,7 +478,11 @@ class KubernetesDriver(Driver):
                     print(f"Deleted pod {pod.metadata.name}")
                 except ApiException:
                     pass
-        services = self.client.list_namespaced_service(namespace=self._namespace)
+        services = self._list_with_retry("list_namespaced_service")
+        if services is None:
+            print("Cleanup incomplete: could not list services; "
+                  f"delete leftovers manually in namespace {self._namespace}")
+            return
         for service in services.items:
             if any(
                     x in service.metadata.name
