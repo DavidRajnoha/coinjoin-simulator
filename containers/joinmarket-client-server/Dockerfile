@@ -1,4 +1,4 @@
-FROM joinmarket-latest:taker-logs
+FROM joinmarket-latest:yg-pe-rpc
 
 
 # Copy the config file to the right place

@@ -636,15 +636,27 @@ class JoinMarketClientServer:
         cjfee_r,
         ordertype,
         minsize,
-        maxsize
+        maxsize,
+        txfee_factor=None,
+        cjfee_factor=None,
+        size_factor=None
     ):
         """
         Start the yield generator service with the specified configuration.
-        - txfee: str or int, e.g., "0" (absolute fee in satoshis)
-        - cjfee_a: str or int, e.g., "5000" (absolute coinjoin fee in satoshis)
-        - cjfee_r: str or float, e.g., "0.00004" (relative coinjoin fee as a fraction)
-        - ordertype: str, e.g., "reloffer" or "absoffer"
-        - minsize: str or int, minimum coinjoin size in satoshis. Should be higher then 27300sats
+
+        Basic parameters:
+        - txfee: Transaction fee contribution in satoshis
+        - cjfee_a: Absolute coinjoin fee in satoshis
+        - cjfee_r: Relative coinjoin fee as decimal
+        - ordertype: "reloffer" or "absoffer"
+        - minsize/maxsize: Coinjoin size range in satoshis
+
+        Privacy-Enhanced parameters (optional):
+        - txfee_factor: Randomization factor ±(txfee × factor)
+        - cjfee_factor: Randomization factor ±(cjfee × factor)
+        - size_factor: Randomization factor ±(size × factor)
+
+        If any factor is provided, the privacy-enhanced YG will be used.
         """
         method = "POST"
         endpoint = f"/wallet/{self.walletname}/maker/start"
@@ -656,6 +668,14 @@ class JoinMarketClientServer:
             "minsize": str(minsize),
             "maxsize": str(maxsize)
         }
+
+        # Add privacy-enhanced factors if present (rounded to 2 decimal places)
+        if txfee_factor is not None:
+            json_data["txfee_factor"] = f"{txfee_factor:.2f}"
+        if cjfee_factor is not None:
+            json_data["cjfee_factor"] = f"{cjfee_factor:.2f}"
+        if size_factor is not None:
+            json_data["size_factor"] = f"{size_factor:.2f}"
 
         try:
             response = self._rpc(method, endpoint, json_data=json_data)
@@ -672,15 +692,27 @@ class JoinMarketClientServer:
         cjfee_r,
         ordertype,
         minsize,
-        maxsize
+        maxsize,
+        txfee_factor=None,
+        cjfee_factor=None,
+        size_factor=None
     ):
         """
         Async start the yield generator service with the specified configuration.
-        - txfee: str or int, e.g., "0" (absolute fee in satoshis)
-        - cjfee_a: str or int, e.g., "5000" (absolute coinjoin fee in satoshis)
-        - cjfee_r: str or float, e.g., "0.00004" (relative coinjoin fee as a fraction)
-        - ordertype: str, e.g., "reloffer" or "absoffer"
-        - minsize: str or int, minimum coinjoin size in satoshis. Should be higher then 27300sats
+
+        Basic parameters:
+        - txfee: Transaction fee contribution in satoshis
+        - cjfee_a: Absolute coinjoin fee in satoshis
+        - cjfee_r: Relative coinjoin fee as decimal
+        - ordertype: "reloffer" or "absoffer"
+        - minsize/maxsize: Coinjoin size range in satoshis
+
+        Privacy-Enhanced parameters (optional):
+        - txfee_factor: Randomization factor ±(txfee × factor)
+        - cjfee_factor: Randomization factor ±(cjfee × factor)
+        - size_factor: Randomization factor ±(size × factor)
+
+        If any factor is provided, the privacy-enhanced YG will be used.
         """
         method = "POST"
         endpoint = f"/wallet/{self.walletname}/maker/start"
@@ -692,6 +724,14 @@ class JoinMarketClientServer:
             "minsize": str(minsize),
             "maxsize": str(maxsize)
         }
+
+        # Add privacy-enhanced factors if present (rounded to 2 decimal places)
+        if txfee_factor is not None:
+            json_data["txfee_factor"] = f"{txfee_factor:.2f}"
+        if cjfee_factor is not None:
+            json_data["cjfee_factor"] = f"{cjfee_factor:.2f}"
+        if size_factor is not None:
+            json_data["size_factor"] = f"{size_factor:.2f}"
 
         try:
             response = await self._rpc_async(method, endpoint, json_data=json_data)

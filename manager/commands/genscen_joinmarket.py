@@ -459,6 +459,30 @@ def setup_parser(parser: argparse.ArgumentParser):
     parser.add_argument("--bond-maker-extra-utxos", action="store_true", help="give fidelity bond makers more UTXOs scaled by taker count to handle concurrent coinjoins")
     parser.add_argument("--bond-maker-utxo-multiplier", type=float, default=1.0, help="multiplier for bond maker UTXOs (e.g., 1.5 = 50% more UTXOs than taker count)")
 
+    # Privacy-Enhanced Yield Generator
+    parser.add_argument("--privacy-enhanced-percentage", type=float, default=0.0,
+                       help="percentage of makers to use privacy-enhanced YG (0.0-1.0, enables PE when > 0)")
+    # Optional: Override default factors with custom ranges
+    parser.add_argument("--txfee-factor-min", type=float, default=0.2,
+                       help="minimum txfee randomization factor (default: 0.2 = ±20%%)")
+    parser.add_argument("--txfee-factor-max", type=float, default=0.2,
+                       help="maximum txfee randomization factor (default: 0.2 = ±20%%)")
+    parser.add_argument("--cjfee-factor-min", type=float, default=0.1,
+                       help="minimum cjfee randomization factor (default: 0.1 = ±10%%)")
+    parser.add_argument("--cjfee-factor-max", type=float, default=0.1,
+                       help="maximum cjfee randomization factor (default: 0.1 = ±10%%)")
+    parser.add_argument("--size-factor-min", type=float, default=0.1,
+                       help="minimum size randomization factor (default: 0.1 = ±10%%)")
+    parser.add_argument("--size-factor-max", type=float, default=0.1,
+                       help="maximum size randomization factor (default: 0.1 = ±10%%)")
+    # Optional: Use quantiles instead of ranges
+    parser.add_argument("--txfee-factor-quantiles", type=str,
+                       help="quantile values for txfee factor (e.g., '0.15,0.2,0.25')")
+    parser.add_argument("--cjfee-factor-quantiles", type=str,
+                       help="quantile values for cjfee factor (e.g., '0.08,0.1,0.12')")
+    parser.add_argument("--size-factor-quantiles", type=str,
+                       help="quantile values for size factor (e.g., '0.08,0.1,0.12')")
+
     # Quantile-based distribution options
     parser.add_argument("--use-quantiles", action="store_true", help="use quantile-based distributions instead of min/max ranges")
     parser.add_argument("--fee-absolute-quantiles", type=str, default="1000,2000,3000,4000,5000,6000",
@@ -747,6 +771,60 @@ def handler(args):
                 wallet["fidelity_bond"] = bond_config_obj
 
         scenario["wallets"].append(wallet)
+
+    # Apply privacy-enhanced factors to makers if enabled
+    if args.privacy_enhanced_percentage > 0:
+        maker_wallets = [w for w in scenario["wallets"] if w["type"] == "maker"]
+        total_makers = len(maker_wallets)
+        num_privacy_makers = int(total_makers * args.privacy_enhanced_percentage)
+
+        if num_privacy_makers > 0:
+            # Randomly select which makers get privacy-enhanced mode
+            privacy_indices = set(random.sample(range(total_makers), num_privacy_makers))
+
+            print(f"Privacy-enhanced makers: {num_privacy_makers}/{total_makers} " +
+                  f"({args.privacy_enhanced_percentage*100:.0f}%)")
+
+            # Parse quantiles if provided
+            txfee_quantiles = None
+            cjfee_quantiles = None
+            size_quantiles = None
+
+            if args.use_quantiles:
+                if args.txfee_factor_quantiles:
+                    txfee_quantiles = parse_list_float(args.txfee_factor_quantiles)
+                if args.cjfee_factor_quantiles:
+                    cjfee_quantiles = parse_list_float(args.cjfee_factor_quantiles)
+                if args.size_factor_quantiles:
+                    size_quantiles = parse_list_float(args.size_factor_quantiles)
+
+            for idx, wallet in enumerate(maker_wallets):
+                if idx in privacy_indices:
+                    for offer in wallet["offers"]:
+                        # Add txfee_factor
+                        if txfee_quantiles:
+                            offer["txfee_factor"] = sample_from_quantiles(txfee_quantiles, 1)[0]
+                        else:
+                            offer["txfee_factor"] = random.uniform(
+                                args.txfee_factor_min, args.txfee_factor_max)
+
+                        # Add cjfee_factor
+                        if cjfee_quantiles:
+                            offer["cjfee_factor"] = sample_from_quantiles(cjfee_quantiles, 1)[0]
+                        else:
+                            offer["cjfee_factor"] = random.uniform(
+                                args.cjfee_factor_min, args.cjfee_factor_max)
+
+                        # Add size_factor
+                        if size_quantiles:
+                            offer["size_factor"] = sample_from_quantiles(size_quantiles, 1)[0]
+                        else:
+                            offer["size_factor"] = random.uniform(
+                                args.size_factor_min, args.size_factor_max)
+
+            print(f"  Default factors: txfee={args.txfee_factor_min}-{args.txfee_factor_max}, " +
+                  f"cjfee={args.cjfee_factor_min}-{args.cjfee_factor_max}, " +
+                  f"size={args.size_factor_min}-{args.size_factor_max}")
 
     # Calculate and display bond statistics
     wallets_with_bonds = [w for w in scenario["wallets"] if w.get("fidelity_bond", {}).get("enabled", False)]
