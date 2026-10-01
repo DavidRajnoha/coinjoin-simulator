@@ -134,9 +134,9 @@ To resume after a crash: put the not-yet-finished scenario files in a new direct
    realized fees from `logs/yigen-statement.csv`; offers over time from `data/orderbook/`;
    configuration and seed from `scenario.json`.
 
-## Not yet committed (as of 2026-10-01)
+## Source state
 
-The generator changes (`--seed`, fee grids), `campaign_2026.sh`, the campaign directory, the
-JoinMarket patch in `containers/joinmarket-client-server/Dockerfile`, the persistent-logs mount in
-`containers/emulator-manager/deployment.yaml`, and the earlier joinmarket-ng / remote CLI work are
-all uncommitted on branch `kubernetes-openshift-with-shadowsocks`.
+The code and docs of this campaign are the commits `d2b0e24..campaign-2026` on branch
+`kubernetes-openshift-with-shadowsocks` (tag `campaign-2026`), described commit by commit in
+`docs/review-2026-10-joinmarket-ng-and-campaign.md`. The running images were built from that work
+(digests above); the manager image predates the docs-only and generator commits.

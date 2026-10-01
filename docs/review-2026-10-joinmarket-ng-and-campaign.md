@@ -1,7 +1,8 @@
 # Review notes — joinmarket-ng integration, K8s reliability, remote CLI, campaign 2026
 
-Self-contained summary of the uncommitted work on branch `kubernetes-openshift-with-shadowsocks`
-(base commit `8bcfe28`), written so a reviewer with no prior context can check it. Work done
+Self-contained summary of the commits `d2b0e24..campaign-2026` on branch
+`kubernetes-openshift-with-shadowsocks` (base commit `8bcfe28`), written so a reviewer with no prior
+context can check them. Work done
 2026-09-18 → 2026-10-01. Sections follow the proposed commit split (§2); each lists what changed,
 why, how it was verified, and what to look at critically.
 
@@ -11,9 +12,9 @@ simulations in namespace `rajnoha-ns` while reviewing.
 
 ---
 
-## 1. Ownership of the uncommitted changes
+## 1. Ownership of the changes
 
-Not everything uncommitted was written in this work. At the start (2026-09-18) these were
+Not everything in this series was written in this work. At the start (2026-09-18) these were
 already modified/untracked — the repository owner's own work in progress:
 
 | Pre-existing change | Files |
