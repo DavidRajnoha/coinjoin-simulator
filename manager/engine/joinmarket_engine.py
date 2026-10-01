@@ -261,6 +261,9 @@ class JoinmarketEngine(EngineBase):
     def start_client(self, idx: int, wallet=None):
         name = f"jcs-{idx:03}"
         port = 28184 + idx
+        # A reference tumbler grows to ~91 MiB over a long schedule and gets OOMKilled at
+        # the 64 Mi request (96 Mi limit); single-shot takers and makers stay well below it.
+        memory = 128 if (wallet or {}).get("tumbler_options") else 64
         try:
             print(f"Starting joinmarket-client-server: {name}")
             ip, client_node_ports, route = self.driver.run(
@@ -269,7 +272,7 @@ class JoinmarketEngine(EngineBase):
                 env={},
                 ports={28183: port},
                 cpu=(0.05),
-                memory=(64),
+                memory=memory,
                 service_account="joinmarket",
                 run_as_user=1000,
                 run_as_group=1000,
