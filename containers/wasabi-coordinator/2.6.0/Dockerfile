@@ -26,7 +26,6 @@ RUN useradd -u 1000 -ms /bin/sh wasabi
 USER 1000:1000
 COPY --from=0 --chown=wasabi:wasabi /wasabi-src/WalletWasabi.Coordinator/bin/Release/net8.0 /home/wasabi/
 COPY --chown=wasabi:wasabi appsettings.json /home/wasabi/
-COPY --chown=wasabi:wasabi Config.json /home/wasabi/Config.json
 COPY --chown=wasabi:wasabi run.sh /home/wasabi/
 WORKDIR /home/wasabi
 CMD ["./run.sh"]

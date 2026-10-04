@@ -1,18 +1,21 @@
 #!/bin/bash
-if [ -z "$ADDR_BTC_NODE" ]; then
-    export ADDR_BTC_NODE="btc-node"
-fi
+set -eu
 
 export WASABI_BIND="http://0.0.0.0:37128"
 
-
 echo "Wasabi binding to $WASABI_BIND"
-echo $WASABI_BIND
 rm -rf /home/wasabi/.walletwasabi
 mkdir -p /home/wasabi/.walletwasabi/coordinator
 
-( echo "cat <<EOF" ; cat /home/wasabi/Config.json ; echo EOF ) | sh > /home/wasabi/.walletwasabi/coordinator/Config.json
+config_deadline=$((SECONDS + ${WASABI_COORDINATOR_CONFIG_TIMEOUT:-120}))
+while [ ! -f /home/wasabi/coordinator-config.ready ]; do
+    if [ "$SECONDS" -ge "$config_deadline" ]; then
+        echo "Timed out waiting for coordinator configuration upload" >&2
+        exit 1
+    fi
+    sleep 1
+done
 
-sleep 15
-
-./WalletWasabi.Coordinator --loglevel=trace
+mv /home/wasabi/coordinator-config.json /home/wasabi/.walletwasabi/coordinator/Config.json
+rm /home/wasabi/coordinator-config.ready
+exec ./WalletWasabi.Coordinator --loglevel=trace
