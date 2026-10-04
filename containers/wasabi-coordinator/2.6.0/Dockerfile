@@ -9,6 +9,9 @@ RUN git clone --depth 1 --branch v2.6.0 https://github.com/WalletWasabi/WalletWa
 COPY logger.patch /wasabi-src/logger.patch
 RUN patch --binary -p1 < logger.patch
 
+COPY mining_fee_rate.patch /wasabi-src/mining_fee_rate.patch
+RUN patch --binary -p1 < mining_fee_rate.patch
+
 WORKDIR /wasabi-src/WalletWasabi.Coordinator
 # NuGet Audit flags NU1903 for a transitive dependency pinned by this
 # release and warnings are errors here, so an unchanged rebuild fails.
