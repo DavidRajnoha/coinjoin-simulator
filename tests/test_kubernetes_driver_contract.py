@@ -172,7 +172,13 @@ def test_waiting_for_a_pod_ip_has_a_deadline() -> None:
 
 def running_pod() -> SimpleNamespace:
     return SimpleNamespace(
-        spec=SimpleNamespace(node_name="node-1"), status=SimpleNamespace(phase="Running")
+        spec=SimpleNamespace(node_name="node-1"),
+        status=SimpleNamespace(
+            phase="Running",
+            container_statuses=[SimpleNamespace(
+                name="jcs-000", state=SimpleNamespace(running=SimpleNamespace(), terminated=None)
+            )],
+        ),
     )
 
 
@@ -435,6 +441,60 @@ def test_upload_stages_the_archive_in_chunks_and_unpacks_it(tmp_path) -> None:
         extracted = archive.extractfile(member)
         assert extracted is not None
         assert extracted.read() == contents
+
+
+def test_upload_waits_for_the_container_even_when_the_pod_phase_is_running(tmp_path) -> None:
+    instance = driver()
+    waiting = running_pod()
+    waiting.status.container_statuses[0].state.running = None
+    instance.client.read_namespaced_pod_status.side_effect = [waiting, running_pod()]
+    source = tmp_path / "scenario.json"
+    source.write_text("{}", encoding="utf-8")
+
+    with (
+        patch("manager.driver.kubernetes.stream", return_value=FakeStream()) as open_stream,
+        patch("manager.driver.kubernetes.sleep") as sleep,
+    ):
+        sleep.side_effect = lambda _seconds: open_stream.assert_not_called()
+        instance.upload("jcs-000", str(source), "/app/scenario.json")
+
+    sleep.assert_called_once_with(1)
+    assert open_stream.called
+
+
+@pytest.mark.parametrize("phase", ["Failed", "Succeeded"])
+def test_upload_rejects_a_terminal_pod_without_exec(tmp_path, phase) -> None:
+    instance = driver()
+    instance.client.read_namespaced_pod_status.return_value.status.phase = phase
+    with patch("manager.driver.kubernetes.stream") as open_stream:
+        with pytest.raises(StartupError, match=f"terminal phase {phase}"):
+            instance.upload("jcs-000", str(tmp_path / "unused"), "/app/scenario.json")
+    open_stream.assert_not_called()
+
+
+def test_upload_rejects_a_terminated_container_without_exec(tmp_path) -> None:
+    instance = driver()
+    state = instance.client.read_namespaced_pod_status.return_value.status.container_statuses[0].state
+    state.running = None
+    state.terminated = SimpleNamespace(exit_code=1)
+    with patch("manager.driver.kubernetes.stream") as open_stream:
+        with pytest.raises(StartupError, match="container terminated"):
+            instance.upload("jcs-000", str(tmp_path / "unused"), "/app/scenario.json")
+    open_stream.assert_not_called()
+
+
+def test_upload_waiting_for_a_container_has_a_deadline(tmp_path) -> None:
+    instance = driver()
+    instance.client.read_namespaced_pod_status.return_value.status = SimpleNamespace(
+        phase="Pending", container_statuses=None
+    )
+    with (
+        patch("manager.driver.kubernetes.time.monotonic", side_effect=[0.0, 1000.0]),
+        patch("manager.driver.kubernetes.stream") as open_stream,
+        pytest.raises(TimeoutError, match="Timed out waiting to upload.*Pending"),
+    ):
+        instance.upload("jcs-000", str(tmp_path / "unused"), "/app/scenario.json")
+    open_stream.assert_not_called()
 
 
 def test_upload_fails_when_the_remote_command_writes_to_stderr(tmp_path) -> None:

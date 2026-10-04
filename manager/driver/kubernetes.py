@@ -551,6 +551,8 @@ class KubernetesDriver(Driver):
             return None
 
     def upload(self, name, src_path, dst_path):
+        deadline = time.monotonic() + UPLOAD_TIMEOUT_SECONDS
+        self._wait_for_running_container(name, deadline)
         buf = BytesIO()
         with tarfile.open(fileobj=buf, mode="w:tar") as tar:
             tar.add(src_path, arcname=dst_path)
@@ -559,8 +561,6 @@ class KubernetesDriver(Driver):
         # payload is staged in text chunks and unpacked with a checked command.
         payload = base64.b64encode(buf.getvalue()).decode("ascii")
         remote_payload = f"/tmp/coinjoin-emulator-upload-{uuid.uuid4().hex}.b64"
-        deadline = time.monotonic() + UPLOAD_TIMEOUT_SECONDS
-
         try:
             for offset in range(0, len(payload), UPLOAD_COMMAND_CHUNK_SIZE):
                 chunk = payload[offset:offset + UPLOAD_COMMAND_CHUNK_SIZE]
@@ -573,6 +573,23 @@ class KubernetesDriver(Driver):
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
             raise
+
+    def _wait_for_running_container(self, name, deadline):
+        while True:
+            pod = self.client.read_namespaced_pod_status(name=name, namespace=self.namespace)
+            phase = pod.status.phase
+            if phase in {"Failed", "Succeeded"}:
+                raise StartupError(f"Cannot upload to pod {name}: terminal phase {phase}")
+            for container in pod.status.container_statuses or []:
+                if container.name != name:
+                    continue
+                if container.state.terminated is not None:
+                    raise StartupError(f"Cannot upload to pod {name}: container terminated")
+                if phase == "Running" and container.state.running is not None:
+                    return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting to upload to pod {name}: container is not running (phase {phase})")
+            sleep(1)
 
     def _append_upload_chunk(self, name, dst_path, deadline, chunk, remote_payload, redirect):
         self._exec_checked(
