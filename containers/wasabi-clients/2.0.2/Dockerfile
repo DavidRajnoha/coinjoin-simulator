@@ -20,8 +20,13 @@ RUN dotnet build -c Release
 FROM mcr.microsoft.com/dotnet/aspnet:6.0
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 
-# Install SkiaSharp dependencies
-RUN apt-get update && apt-get install -y \
+# Install SkiaSharp dependencies from the snapshot paired with this EOL base image.
+RUN sed -i \
+        -e 's|^# deb http://snapshot.debian.org/archive/|deb http://snapshot.debian.org/archive/|' \
+        -e 's|^deb http://deb.debian.org/|# deb http://deb.debian.org/|' \
+        /etc/apt/sources.list \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y \
     libfontconfig1 \
     libharfbuzz0b \
     libfreetype6 \
