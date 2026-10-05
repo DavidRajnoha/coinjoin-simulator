@@ -47,8 +47,6 @@ RUN useradd -ms /bin/sh wasabi
 
 # Needs to be numeric for kubernetes security context
 USER 1000:1000
-RUN ls /usr/lib/x86_64-linux-gnu/
-#RUN chown wasabi:wasabi /usr/lib/x86_64-linux-gnu/libX11.so.6
 COPY --from=0 --chown=wasabi:wasabi /wasabi-src/WalletWasabi.Fluent.Desktop/bin/Release/net6.0 /home/wasabi/
 COPY --chown=wasabi:wasabi run.sh /home/wasabi/
 COPY --chown=wasabi:wasabi Config.json /home/wasabi/
