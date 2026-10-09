@@ -14,3 +14,7 @@ scenarios/joinmarket/basic
 logs_download
 .simulation*
 emucoinjoin.egg-info/
+.runner*
+.run-*
+*.logs
+runner_logs/

@@ -153,3 +153,34 @@ Running the simulation on a remote cluster using pre-existing namespace and a pr
 ```bash
 python manager.py run --driver kubernetes --namespace custom-coinjoin-ns --reuse-namespace --image-prefix "crocsmuni/" --proxy "socks5://127.0.0.1:8123" --scenario "scenarios/uniform-dynamic-500-30utxo.json"
 ```
+
+#### Running from an in-cluster orchestrator
+
+The command above drives the simulation from your machine, so it has to stay
+connected for the whole run. For long runs, deploy the orchestrator into the
+cluster and control it with `manager/remote_cli.py`. The orchestrator runs
+`manager.py` inside the cluster, so a dropped connection does not end the run.
+
+```bash
+# once per namespace: applies containers/emulator-manager/*.yaml
+python manager/remote_cli.py --namespace NS deploy --image-prefix "registry.example/"
+
+# copy scenarios into the orchestrator's workspace
+kubectl cp scenarios/my_batch NS/$(kubectl get pod -n NS -l app=emulation-manager -o name | cut -d/ -f2):/workspace/scenarios/my_batch
+
+# one simulation, or every *.json in a directory in sorted order with cleanup in between
+python manager/remote_cli.py --namespace NS run --scenario /workspace/scenarios/my_batch/one.json
+python manager/remote_cli.py --namespace NS run --scenario-dir /workspace/scenarios/my_batch
+```
+
+Paths passed to `run` are paths *inside* the orchestrator container, not on your machine.
+Once a run is started, the other commands find it from `.run-<namespace>`; you do not
+need to say whether it was a single run or a batch:
+
+| Command | Effect |
+| --- | --- |
+| `status` | progress of the active run (batch: current scenario, how many done) |
+| `logs -f` | stream the run's output |
+| `skip` | batch only: abandon the current scenario, continue with the next |
+| `stop` | stop the run (batch: the whole batch) |
+| `download-logs -n 3` | fetch the last 3 finished run archives |
