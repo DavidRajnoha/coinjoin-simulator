@@ -261,6 +261,16 @@ def test_download_rejects_invalid_base64(tmp_path) -> None:
             driver().download("jcs-000", "/logs/", str(tmp_path))
 
 
+def test_download_rejects_invalid_base64_after_valid_chunks(tmp_path) -> None:
+    encoded = archive()
+    response = FakeStream(chunks=[encoded[:10], encoded[10:], "!!!!"])
+    with patch("manager.driver.kubernetes.stream", return_value=response):
+        with pytest.raises(RuntimeError, match="invalid base64"):
+            driver().download("jcs-000", "/logs/", str(tmp_path))
+
+    assert not (tmp_path / "logs").exists()
+
+
 def archive() -> str:
     payload = io.BytesIO()
     contents = b"hello"

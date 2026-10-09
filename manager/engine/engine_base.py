@@ -19,6 +19,9 @@ from manager.run_timezone import DEFAULT_RUN_TIMEZONE
 DISTRIBUTOR_UTXOS = 200
 BATCH_SIZE = 5  # smaller batches avoid UTXO race conditions
 BTC = 100_000_000
+# Each concurrent client log download holds an exec websocket and spools an archive, so the
+# pool is bounded instead of growing with the CPU count of whatever machine runs the manager.
+LOG_DOWNLOAD_WORKERS = int(os.environ.get("COINJOIN_LOG_DOWNLOAD_WORKERS", "8"))
 INFRASTRUCTURE_IMAGES = (
     "btc-node",
     "joinmarket-client-server",
@@ -444,7 +447,7 @@ class EngineBase:
         print("- finished storing engine logs, stored producer-label manifest")
 
         print(f"- storing logs for {len(self.clients)} clients in parallel")
-        with multiprocessing.pool.ThreadPool() as pool:
+        with multiprocessing.pool.ThreadPool(LOG_DOWNLOAD_WORKERS) as pool:
             pool.starmap(self.store_client_logs, [(client, data_path) for client in self.clients])
 
         archive_base = os.path.join(run_path, ".emulation_logs")

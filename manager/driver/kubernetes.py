@@ -3,6 +3,7 @@ import os
 import re
 import shlex
 import tarfile
+import tempfile
 import time
 import traceback
 import uuid
@@ -39,6 +40,47 @@ def _check_tar_stderr(name, src_path, stderr):
         if not BENIGN_TAR_WARNING_RE.fullmatch(line):
             raise RuntimeError(f"download of {name}:{src_path} failed: {line}")
         print(f"[WARNING] {name}:{src_path}: {line}")
+
+
+class _Base64Spool:
+    """Decode a base64 stream that arrives in arbitrary text chunks into a binary file."""
+
+    def __init__(self, target, name, src_path):
+        self._target = target
+        self._pending = ""
+        self._written = 0
+        self._invalid = None
+        self._source = f"{name}:{src_path}"
+
+    def feed(self, chunk):
+        if self._invalid is not None:
+            return
+        self._pending += "".join(chunk.split())
+        # Base64 decodes in 4-character groups; carry a partial group to the next chunk.
+        usable = len(self._pending) - len(self._pending) % 4
+        self._decode(self._pending[:usable])
+        self._pending = self._pending[usable:]
+
+    def finish(self):
+        """Raise for invalid or empty output; call after the transfer's stderr was checked."""
+        if self._invalid is None and self._pending:
+            self._decode(self._pending)
+            self._pending = ""
+        if self._invalid is not None:
+            raise RuntimeError(f"download of {self._source} returned invalid base64") from self._invalid
+        if not self._written:
+            raise RuntimeError(f"download of {self._source} produced an empty archive")
+
+    def _decode(self, encoded):
+        if not encoded:
+            return
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except ValueError as error:
+            self._invalid = error
+            return
+        self._target.write(payload)
+        self._written += len(payload)
 
 
 MANAGED_BY_LABEL = "app.kubernetes.io/managed-by"
@@ -418,31 +460,30 @@ class KubernetesDriver(Driver):
             f"tar cf - -C {shlex.quote(src_parent)} {shlex.quote(src_target)} | base64 | tr -d '\\n'",
         ]
         resp = self._exec_stream(name, exec_command, f"download {src_path}")
-        encoded_chunks = []
         stderr_chunks = []
         deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
-        try:
-            while resp.is_open():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"Timed out downloading {name}:{src_path}")
-                resp.update(timeout=1)
-                if resp.peek_stdout():
-                    encoded_chunks.append(resp.read_stdout())
-                if resp.peek_stderr():
-                    stderr_chunks.append(resp.read_stderr())
-        finally:
-            resp.close()
+        # Decode into a temporary file as chunks arrive: log gathering downloads several pods
+        # at once, and holding each archive in memory (encoded and decoded) OOMKilled the
+        # manager during the teardown of a 136-client run.
+        with tempfile.TemporaryFile() as archive:
+            decoder = _Base64Spool(archive, name, src_path)
+            try:
+                while resp.is_open():
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"Timed out downloading {name}:{src_path}")
+                    resp.update(timeout=1)
+                    if resp.peek_stdout():
+                        decoder.feed(resp.read_stdout())
+                    if resp.peek_stderr():
+                        stderr_chunks.append(resp.read_stderr())
+            finally:
+                resp.close()
 
-        _check_tar_stderr(name, src_path, "".join(stderr_chunks))
-        encoded = "".join(encoded_chunks)
-        if not encoded.strip():
-            raise RuntimeError(f"download of {name}:{src_path} produced an empty archive")
-        try:
-            payload = base64.b64decode(encoded, validate=True)
-        except ValueError as error:
-            raise RuntimeError(f"download of {name}:{src_path} returned invalid base64") from error
-        with tarfile.open(fileobj=BytesIO(payload)) as tar:
-            tar.extractall(dst_path)
+            _check_tar_stderr(name, src_path, "".join(stderr_chunks))
+            decoder.finish()
+            archive.seek(0)
+            with tarfile.open(fileobj=archive) as tar:
+                tar.extractall(dst_path)
 
     def pause(self, name):
         # Kubernetes has no container freezer; stop every process but the
