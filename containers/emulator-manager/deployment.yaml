@@ -16,6 +16,32 @@ spec:
         app: emulation-manager
         component: orchestrator
     spec:
+      # Lets uid 1000 write to the PVC where the storage supports ownership changes.
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+      # The /app/logs subPath mount needs /workspace/logs to exist and be writable by uid 1000;
+      # kubelet would otherwise create it owned by root and every run archive would fail.
+      - command:
+        - sh
+        - -c
+        - mkdir -p /workspace/logs && test -w /workspace/logs || { echo "/workspace/logs is not writable by uid 1000; create it on the volume with that owner" >&2; exit 1; }
+        image: ghcr.io/ondrejman/emulator-manager:latest
+        name: prepare-workspace
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsGroup: 1000
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - mountPath: /workspace
+          name: workspace
       containers:
       - command:
         - sleep
@@ -33,10 +59,10 @@ spec:
         resources:
           limits:
             cpu: 2000m
-            memory: 2Gi
+            memory: 6Gi
           requests:
             cpu: 500m
-            memory: 512Mi
+            memory: 2Gi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -51,8 +77,15 @@ spec:
         volumeMounts:
         - mountPath: /workspace
           name: workspace
+        # manager.py stores run archives under ./logs (= /app/logs); keep them on the PVC so a
+        # pod restart, OOMKill or rollout does not lose them (prepare-workspace creates the dir).
+        - mountPath: /app/logs
+          name: workspace
+          subPath: logs
         workingDir: /app
       serviceAccountName: emulation-manager
       volumes:
-      - emptyDir: {}
-        name: workspace
+      # pvc.yaml; deploy applies it before this deployment.
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: emulation-manager-workspace

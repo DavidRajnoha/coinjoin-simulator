@@ -38,6 +38,9 @@ def test_override_preserves_manifest_and_applies_complete_deployment_once(manife
     original_bytes = manifest_path.read_bytes()
     expected = deepcopy(original)
     expected["spec"]["template"]["spec"]["containers"][1]["image"] = "registry.example/emulator-manager"
+    for init_container in expected["spec"]["template"]["spec"].get("initContainers", []):
+        if init_container["image"] == containers[1]["image"]:
+            init_container["image"] = "registry.example/emulator-manager"
 
     with patch("manager.kubernetes_local_proxy.subprocess.run") as run:
         assert proxy().deploy_manager(image_prefix="registry.example/", wait_ready=False)

@@ -1043,6 +1043,7 @@ class KubernetesLocalProxy:
                 "role.yaml",
                 "rolebinding.yaml",
                 "serviceaccount.yaml",
+                "pvc.yaml",
                 "deployment.yaml"
             ]
 
@@ -1052,14 +1053,20 @@ class KubernetesLocalProxy:
                     if manifest == "deployment.yaml" and image_prefix:
                         with open(manifest_path, encoding="utf-8") as source:
                             deployment = yaml.safe_load(source)
-                        for container in deployment["spec"]["template"]["spec"]["containers"]:
+                        pod_spec = deployment["spec"]["template"]["spec"]
+                        for container in pod_spec["containers"]:
                             if container["name"] == "manager":
+                                original_image = container["image"]
                                 container["image"] = manager_image
                                 break
                         else:
                             raise CoinjoinEmulatorError(
                                 f"Container 'manager' not found in {manifest_path}"
                             )
+                        # Init containers that run the manager image follow the override.
+                        for container in pod_spec.get("initContainers", []):
+                            if container.get("image") == original_image:
+                                container["image"] = manager_image
                         subprocess.run(
                             self._kubectl_base_cmd
                             + ["apply", "-f", "-", "-n", self.namespace],
