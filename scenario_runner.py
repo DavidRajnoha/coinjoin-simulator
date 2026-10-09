@@ -15,6 +15,8 @@ from typing import List, Optional, Tuple
 
 from manager.process_output import stream_process_output
 
+DEFAULT_SHADOWSOCKS_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shadowsocks", "config_local.yaml")
+
 
 class ScenarioRunner:
     def __init__(self,
@@ -22,7 +24,7 @@ class ScenarioRunner:
                  namespace: str = "rajnoha-ns",
                  image_prefix: str = "drajnoha/",
                  proxy: str = "socks5://127.0.0.1:8123",
-                 shadowsocks_config: str = "/home/drajnoha/Code/PycharmProjects/coinjoin-simulator/shadowsocks/config_local.yaml",
+                 shadowsocks_config: str = DEFAULT_SHADOWSOCKS_CONFIG,
                  cleanup_wait: int = 150,
                  in_cluster: bool = False,
                  engine: str = "joinmarket",
@@ -335,7 +337,7 @@ def main():
     )
     parser.add_argument("--proxy", default="socks5://127.0.0.1:8123", help="Proxy URL")
     parser.add_argument("--shadowsocks-config",
-                        default="/home/drajnoha/Code/PycharmProjects/coinjoin-simulator/shadowsocks/config_local.yaml",
+                        default=DEFAULT_SHADOWSOCKS_CONFIG,
                         help="Shadowsocks config file")
     parser.add_argument("--cleanup-wait", type=int, default=90,
                         help="Seconds to wait after cleanup")
